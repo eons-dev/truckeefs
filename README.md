@@ -23,48 +23,48 @@ Tahoe-LAFS: http://tahoe-lafs.org/
 
 ### Usage
 
-    tahoestaticfs [options] [mountpoint]
+	tahoestaticfs [options] [mountpoint]
 
-    Tahoe-LAFS directory mounted as a filesystem, with local
-    caching. Cached data is encrypted with a key derived from the
-    directory capability mounted.
-    
-    Dircap of the root directory is read from stdin on startup. In scripts, do::
-    
-        awk '/^root:/ {print $2}' < ~/.tahoe/private/aliases \\
-            | tahoestaticfs ...
-    
-    Cache can be invalidated by `touch <mountpoint>/.tahoestaticfs-invalidate`,
-    or by removing files in the cache directory.
+	Tahoe-LAFS directory mounted as a filesystem, with local
+	caching. Cached data is encrypted with a key derived from the
+	directory capability mounted.
+	
+	Dircap of the root directory is read from stdin on startup. In scripts, do::
+	
+		awk '/^root:/ {print $2}' < ~/.tahoe/private/aliases \\
+			| tahoestaticfs ...
+	
+	Cache can be invalidated by `touch <mountpoint>/.tahoestaticfs-invalidate`,
+	or by removing files in the cache directory.
 
-    Options:
-        --version              show program's version number and exit
-        -h, --help             show this help message and exit
-        -o opt,[opt...]        mount options
-        -c CACHE, --cache=CACHE
-                               Cache directory
-        -u NODE_URL, --node-url=NODE_URL
-                               Tahoe gateway node URL
-        -D, --cache-data       Cache also file data
-        -S CACHE_SIZE, --cache-size=CACHE_SIZE
-                               Target cache size
-        -w WRITE_LIFETIME, --write-cache-lifetime=WRITE_LIFETIME
-                               Cache lifetime for write operations (seconds).
-                               Default: 10 sec
-        -r READ_LIFETIME, --read-cache-lifetime=READ_LIFETIME
-                               Cache lifetime for read operations (seconds).
-                               Default: 10 sec
+	Options:
+		--version			  show program's version number and exit
+		-h, --help			 show this help message and exit
+		-o opt,[opt...]		mount options
+		-c CACHE, --cache=CACHE
+							   Cache directory
+		-u NODE_URL, --node-url=NODE_URL
+							   Tahoe gateway node URL
+		-D, --cache-data	   Cache also file data
+		-S CACHE_SIZE, --cache-size=CACHE_SIZE
+							   Target cache size
+		-w WRITE_LIFETIME, --write-cache-lifetime=WRITE_LIFETIME
+							   Cache lifetime for write operations (seconds).
+							   Default: 10 sec
+		-r READ_LIFETIME, --read-cache-lifetime=READ_LIFETIME
+							   Cache lifetime for read operations (seconds).
+							   Default: 10 sec
 
 For example:
 
-    awk '/^root:/ {print $2}' < ~/.tahoe/private/aliases \\
-        tahoestaticfs -c /var/cache/tahoefscache -D -S 5G -u http://127.0.0.1:8090 /mnt/tahoestatic
+	awk '/^root:/ {print $2}' < ~/.tahoe/private/aliases \\
+		tahoestaticfs -c /var/cache/tahoefscache -D -S 5G -u http://127.0.0.1:8090 /mnt/tahoestatic
 
 **warning:**
 
    Do **not** do this:
 
-       echo URI:DIR2:... | tahoestaticfs
+	   echo URI:DIR2:... | tahoestaticfs
 
    That makes the root capability visible to everyone. Instead, store the root
    capability in a file with appropriate permissions, for example reading it
@@ -120,8 +120,8 @@ in question, but is at least 10000. The salt is stored on-disk as-is.
 
 The AES encryption keys are file-specific, and obtained via:
 
-    prk = HKDF-SHA256-Extract(salt2, master-key)
-    data_key | fn_key = HKDF-SHA256-Expand(prk, pathname, 96)
+	prk = HKDF-SHA256-Extract(salt2, master-key)
+	data_key | fn_key = HKDF-SHA256-Expand(prk, pathname, 96)
 
 The salt2 is a second 32-byte randomly generated salt stored as-is
 on-disk.  The 32-byte data_key is used as the AES-CBC encryption key.

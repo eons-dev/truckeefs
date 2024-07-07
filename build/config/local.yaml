@@ -33,7 +33,7 @@ next:
 					build_in: "./"
 					config:
 						clear_build_path: false
-						test_path: "./test/unit/"
+						test_path: "./test/"
             next:
             - build: py_publish
               run_when_any:
