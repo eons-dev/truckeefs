@@ -41,27 +41,27 @@ def ioerrwrap(func):
 
 
 class TahoeStaticFS(fuse.Fuse):
-    def __init__(self, *args, **kwargs):
-        super(TahoeStaticFS, self).__init__(*args, **kwargs)
-        self.parser.add_option('-c', '--cache', dest='cache', help="Cache directory")
-        self.parser.add_option('-u', '--node-url', dest='node_url', help="Tahoe gateway node URL")
-        self.parser.add_option('-D', '--cache-data', dest='cache_data', action="store_true", help="Cache also file data")
-        self.parser.add_option('-S', '--cache-size', dest='cache_size', help="Target cache size", default="1GB")
-        self.parser.add_option('-w', '--write-cache-lifetime', dest='write_lifetime', default='10',
+    def __init__(this, *args, **kwargs):
+        super(TahoeStaticFS, this).__init__(*args, **kwargs)
+        this.parser.add_option('-c', '--cache', dest='cache', help="Cache directory")
+        this.parser.add_option('-u', '--node-url', dest='node_url', help="Tahoe gateway node URL")
+        this.parser.add_option('-D', '--cache-data', dest='cache_data', action="store_true", help="Cache also file data")
+        this.parser.add_option('-S', '--cache-size', dest='cache_size', help="Target cache size", default="1GB")
+        this.parser.add_option('-w', '--write-cache-lifetime', dest='write_lifetime', default='10',
                                help="Cache lifetime for write operations (seconds). Default: 10 sec")
-        self.parser.add_option('-r', '--read-cache-lifetime', dest='read_lifetime', default='10',
+        this.parser.add_option('-r', '--read-cache-lifetime', dest='read_lifetime', default='10',
                                help="Cache lifetime for read operations (seconds). Default: 10 sec")
-        self.parser.add_option('-l', '--log-level', dest='log_level', default='warning',
+        this.parser.add_option('-l', '--log-level', dest='log_level', default='warning',
                                help="Log level (error, warning, info, debug). Default: warning")
-        self.parser.add_option('-t', '--timeout', dest='timeout', default='30',
+        this.parser.add_option('-t', '--timeout', dest='timeout', default='30',
                                help="Network timeout. Default: 30s")
 
-    def main(self, args=None):
-        if not self.fuse_args.mount_expected():
-            fuse.Fuse.main(self, args)
+    def main(this, args=None):
+        if not this.fuse_args.mount_expected():
+            fuse.Fuse.main(this, args)
             return
 
-        options = self.cmdline[0]
+        options = this.cmdline[0]
         if options.cache is None:
             print("error: --cache not specified")
             sys.exit(1)
@@ -105,16 +105,16 @@ class TahoeStaticFS(fuse.Fuse):
             sys.exit(1)
 
         logger = logging.getLogger('')
-        if self.fuse_args.modifiers.get('foreground'):
+        if this.fuse_args.modifiers.get('foreground'):
             # console logging only
             handler = logging.StreamHandler()
             fmt = logging.Formatter(fmt=("%(asctime)s tahoestaticfs[%(process)d]: " +
-                                         self.fuse_args.mountpoint + " %(levelname)s: %(message)s"))
+                                         this.fuse_args.mountpoint + " %(levelname)s: %(message)s"))
         else:
             # to syslog
             handler = logging.handlers.SysLogHandler(address='/dev/log')
             fmt = logging.Formatter(fmt=("tahoestaticfs[%(process)d]: " +
-                                         self.fuse_args.mountpoint + ": %(levelname)s: %(message)s"))
+                                         this.fuse_args.mountpoint + ": %(levelname)s: %(message)s"))
 
         handler.setFormatter(fmt)
         logger.addHandler(handler)
@@ -125,95 +125,95 @@ class TahoeStaticFS(fuse.Fuse):
         if not os.path.isdir(options.cache):
             os.makedirs(options.cache)
 
-        self.cache = CacheDB(options.cache, rootcap, node_url,
+        this.cache = CacheDB(options.cache, rootcap, node_url,
                              cache_size=cache_size, 
                              cache_data=options.cache_data,
                              read_lifetime=read_lifetime,
                              write_lifetime=write_lifetime)
-        self.io = TahoeConnection(node_url, rootcap, timeout)
+        this.io = TahoeConnection(node_url, rootcap, timeout)
 
-        fuse.Fuse.main(self, args)
+        fuse.Fuse.main(this, args)
 
     # -- Directory handle ops
 
     @ioerrwrap
-    def readdir(self, path, offset):
-        upath = self.cache.get_upath(path)
+    def readdir(this, path, offset):
+        upath = this.cache.get_upath(path)
 
         entries = [fuse.Direntry('.'),
                    fuse.Direntry('..')]
 
-        f = self.cache.open_dir(upath, self.io)
+        f = this.cache.open_dir(upath, this.io)
         try:
             for c in f.listdir():
-                entries.append(fuse.Direntry(self.cache.path_from_upath(c)))
+                entries.append(fuse.Direntry(this.cache.path_from_upath(c)))
         finally:
-            self.cache.close_dir(f)
+            this.cache.close_dir(f)
 
         return entries
 
     # -- File ops
 
     @ioerrwrap
-    def open(self, path, flags):
-        upath = self.cache.get_upath(path)
+    def open(this, path, flags):
+        upath = this.cache.get_upath(path)
         basename = os.path.basename(upath)
         if basename == '.tahoestaticfs-invalidate' and (flags & os.O_CREAT):
-            self.cache.invalidate(os.path.dirname(upath))
+            this.cache.invalidate(os.path.dirname(upath))
             return -errno.EACCES
-        return self.cache.open_file(upath, self.io, flags)
+        return this.cache.open_file(upath, this.io, flags)
 
     @ioerrwrap
-    def release(self, path, flags, f):
-        upath = self.cache.get_upath(path)
+    def release(this, path, flags, f):
+        upath = this.cache.get_upath(path)
         try:
             # XXX: if it fails, silent data loss (apart from logs)
-            self.cache.upload_file(f, self.io)
+            this.cache.upload_file(f, this.io)
             return 0
         finally:
-            self.cache.close_file(f)
+            this.cache.close_file(f)
 
     @ioerrwrap
-    def read(self, path, size, offset, f):
-        upath = self.cache.get_upath(path)
-        return f.read(self.io, offset, size)
+    def read(this, path, size, offset, f):
+        upath = this.cache.get_upath(path)
+        return f.read(this.io, offset, size)
 
     @ioerrwrap
-    def create(self, path, flags, mode):
+    def create(this, path, flags, mode):
         # no support for mode in Tahoe, so discard it
-        return self.open(path, flags)
+        return this.open(path, flags)
  
     @ioerrwrap
-    def write(self, path, data, offset, f):
-        upath = self.cache.get_upath(path)
-        self.io.wait_until_write_allowed()
-        f.write(self.io, offset, data)
+    def write(this, path, data, offset, f):
+        upath = this.cache.get_upath(path)
+        this.io.wait_until_write_allowed()
+        f.write(this.io, offset, data)
         return len(data)
 
     @ioerrwrap
-    def ftruncate(self, path, size, f):
+    def ftruncate(this, path, size, f):
         f.truncate(size)
         return 0
 
     @ioerrwrap
-    def truncate(self, path, size):
-        upath = self.cache.get_upath(path)
+    def truncate(this, path, size):
+        upath = this.cache.get_upath(path)
 
-        f = self.cache.open_file(upath, self.io, os.O_RDWR)
+        f = this.cache.open_file(upath, this.io, os.O_RDWR)
         try:
             f.truncate(size)
-            self.cache.upload_file(f, self.io)
+            this.cache.upload_file(f, this.io)
         finally:
-            self.cache.close_file(f)
+            this.cache.close_file(f)
         return 0
 
     # -- Handleless ops
 
     @ioerrwrap
-    def getattr(self, path):
-        upath = self.cache.get_upath(path)
+    def getattr(this, path):
+        upath = this.cache.get_upath(path)
 
-        info = self.cache.get_attr(upath, self.io)
+        info = this.cache.get_attr(upath, this.io)
 
         if info['type'] == 'dir':
             st = fuse.Stat()
@@ -232,22 +232,22 @@ class TahoeStaticFS(fuse.Fuse):
         return st
 
     @ioerrwrap
-    def unlink(self, path):
-        upath = self.cache.get_upath(path)
-        self.cache.unlink(upath, self.io, is_dir=False)
+    def unlink(this, path):
+        upath = this.cache.get_upath(path)
+        this.cache.unlink(upath, this.io, is_dir=False)
         return 0
 
     @ioerrwrap
-    def rmdir(self, path):
-        upath = self.cache.get_upath(path)
-        self.cache.unlink(upath, self.io, is_dir=True)
+    def rmdir(this, path):
+        upath = this.cache.get_upath(path)
+        this.cache.unlink(upath, this.io, is_dir=True)
         return 0
 
     @ioerrwrap
-    def mkdir(self, path, mode):
+    def mkdir(this, path, mode):
         # *mode* is dropped; not supported on tahoe
-        upath = self.cache.get_upath(path)
-        self.cache.mkdir(upath, self.io)
+        upath = this.cache.get_upath(path)
+        this.cache.mkdir(upath, this.io)
         return 0
 
 

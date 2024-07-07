@@ -21,14 +21,14 @@ class BlockStorage(object):
     File storing fixed-size blocks of data.
     """
 
-    def __init__(self, f, block_size):
-        self.f = f
-        self.block_size = block_size
-        self.block_map = array.array('l')
-        self.zero_block = b"\x00"*self.block_size
-        self._reconstruct_free_map()
+    def __init__(this, f, block_size):
+        this.f = f
+        this.block_size = block_size
+        this.block_map = array.array('l')
+        this.zero_block = b"\x00"*this.block_size
+        this._reconstruct_free_map()
 
-    def save_state(self, f):
+    def save_state(this, f):
         f.truncate(0)
         f.seek(0)
         f.write(b"BLK2")
@@ -38,8 +38,8 @@ class BlockStorage(object):
         # correlate with the amount of downloaded data, but
         # compression reduces its correlation with the total size of
         # the file.
-        block_map_data = zlib.compress(self.block_map.tobytes(), 9)
-        f.write(struct.pack('<QQ', self.block_size, len(block_map_data)))
+        block_map_data = zlib.compress(this.block_map.tobytes(), 9)
+        f.write(struct.pack('<QQ', this.block_size, len(block_map_data)))
         f.write(block_map_data)
 
     @classmethod
@@ -58,119 +58,119 @@ class BlockStorage(object):
         block_map.frombytes(s)
         del s
 
-        self = cls.__new__(cls)
-        self.f = f
-        self.block_size = block_size
-        self.block_map = block_map
-        self.zero_block = b"\x00"*self.block_size
-        self._reconstruct_free_map()
-        return self
+        this = cls.__new__(cls)
+        this.f = f
+        this.block_size = block_size
+        this.block_map = block_map
+        this.zero_block = b"\x00"*this.block_size
+        this._reconstruct_free_map()
+        return this.
 
-    def _reconstruct_free_map(self):
-        if self.block_map:
-            max_block = max(self.block_map)
+    def _reconstruct_free_map(this):
+        if this.block_map:
+            max_block = max(this.block_map)
         else:
             max_block = -1
 
         if max_block < 0:
-            self.free_block_idx = 0
-            self.free_map = []
+            this.free_block_idx = 0
+            this.free_map = []
             return
 
         mask = array.array('b', itertools.repeat(0, max_block+1))
-        for x in self.block_map:
+        for x in this.block_map:
             if x >= 0:
                 mask[x] = 1
 
         free_map = [j for j, x in enumerate(mask) if x == 0]
         heapq.heapify(free_map)
 
-        self.free_map = free_map
-        self.free_block_idx = max_block + 1
+        this.free_map = free_map
+        this.free_block_idx = max_block + 1
 
-    def _get_free_block_idx(self):
-        if self.free_map:
-            return heapq.heappop(self.free_map)
-        idx = self.free_block_idx
-        self.free_block_idx += 1
+    def _get_free_block_idx(this):
+        if this.free_map:
+            return heapq.heappop(this.free_map)
+        idx = this.free_block_idx
+        this.free_block_idx += 1
         return idx
 
-    def _add_free_block_idx(self, idx):
-        heapq.heappush(self.free_map, idx)
+    def _add_free_block_idx(this, idx):
+        heapq.heappush(this.free_map, idx)
 
-    def _truncate_free_map(self, end_block):
-        self.free_block_idx = end_block
-        last_map_size = len(self.free_map)
-        self.free_map = [x for x in self.free_map if x < end_block]
-        if last_map_size != len(self.free_map):
-            heapq.heapify(self.free_map)
+    def _truncate_free_map(this, end_block):
+        this.free_block_idx = end_block
+        last_map_size = len(this.free_map)
+        this.free_map = [x for x in this.free_map if x < end_block]
+        if last_map_size != len(this.free_map):
+            heapq.heapify(this.free_map)
 
-    def __contains__(self, idx):
+    def __contains__(this, idx):
         if not idx >= 0:
             raise ValueError("Invalid block index")
-        if idx >= len(self.block_map):
+        if idx >= len(this.block_map):
             return False
-        return self.block_map[idx] != BLOCK_UNALLOCATED
+        return this.block_map[idx] != BLOCK_UNALLOCATED
 
-    def __getitem__(self, idx):
-        if idx not in self:
+    def __getitem__(this, idx):
+        if idx not in this:
             raise KeyError("Block %d not allocated" % (idx,))
 
-        block_idx = self.block_map[idx]
+        block_idx = this.block_map[idx]
         if block_idx >= 0:
-            self.f.seek(self.block_size * block_idx)
-            block = self.f.read(self.block_size)
-            if len(block) < self.block_size:
+            this.f.seek(this.block_size * block_idx)
+            block = this.f.read(this.block_size)
+            if len(block) < this.block_size:
                 # Partial block (end-of-file): consider zero-padded
-                block += b"\x00"*(self.block_size - len(block))
+                block += b"\x00"*(this.block_size - len(block))
             return block
         elif block_idx == BLOCK_ZERO:
-            return self.zero_block
+            return this.zero_block
         else:
             raise IOError(errno.EIO, "Corrupted block map data")
 
-    def __setitem__(self, idx, data):
+    def __setitem__(this, idx, data):
         if not idx >= 0:
             raise ValueError("Invalid block index")
-        if idx >= len(self.block_map):
-            self.block_map.extend(itertools.repeat(BLOCK_UNALLOCATED, idx + 1 - len(self.block_map)))
+        if idx >= len(this.block_map):
+            this.block_map.extend(itertools.repeat(BLOCK_UNALLOCATED, idx + 1 - len(this.block_map)))
 
-        if data is None or data == self.zero_block:
-            block_idx = self.block_map[idx]
+        if data is None or data == this.zero_block:
+            block_idx = this.block_map[idx]
             if block_idx >= 0:
-                self._add_free_block_idx(block_idx)
-            self.block_map[idx] = BLOCK_ZERO
+                this._add_free_block_idx(block_idx)
+            this.block_map[idx] = BLOCK_ZERO
         else:
-            if len(data) > self.block_size:
+            if len(data) > this.block_size:
                 raise ValueError("Too large data block")
 
-            block_idx = self.block_map[idx]
+            block_idx = this.block_map[idx]
             if not block_idx >= 0:
-                block_idx = self._get_free_block_idx()
+                block_idx = this._get_free_block_idx()
 
-            self.block_map[idx] = block_idx
+            this.block_map[idx] = block_idx
 
-            if len(data) < self.block_size:
+            if len(data) < this.block_size:
                 # Partial blocks are OK at the end of the file
                 # only. Such blocks will be automatically zero-padded
                 # by POSIX if writes are done to subsequent blocks.
                 # Other blocks need explicit padding.
-                self.f.seek(0, 2)
-                pos = self.f.tell()
-                if pos > self.block_size * block_idx + len(data):
-                    data += b"\x00" * (self.block_size - len(data))
+                this.f.seek(0, 2)
+                pos = this.f.tell()
+                if pos > this.block_size * block_idx + len(data):
+                    data += b"\x00" * (this.block_size - len(data))
 
-            self.f.seek(self.block_size * block_idx)
-            self.f.write(data)
+            this.f.seek(this.block_size * block_idx)
+            this.f.write(data)
 
-    def truncate(self, num_blocks):
-        self.block_map = self.block_map[:num_blocks]
+    def truncate(this, num_blocks):
+        this.block_map = this.block_map[:num_blocks]
 
         end_block = 0
-        if self.block_map:
-            end_block = max(0, max(self.block_map) + 1)
-        self.f.truncate(self.block_size * end_block)
-        self._truncate_free_map(end_block)
+        if this.block_map:
+            end_block = max(0, max(this.block_map) + 1)
+        this.f.truncate(this.block_size * end_block)
+        this._truncate_free_map(end_block)
 
 
 class BlockCachedFile(object):
@@ -185,18 +185,18 @@ class BlockCachedFile(object):
     synchronous.
     """
 
-    def __init__(self, f, initial_cache_size, block_size=None):
+    def __init__(this, f, initial_cache_size, block_size=None):
         if block_size is None:
             block_size = BLOCK_SIZE
-        self.size = initial_cache_size
-        self.storage = BlockStorage(f, block_size)
-        self.block_size = self.storage.block_size
-        self.first_uncached_block = 0
-        self.cache_size = initial_cache_size
+        this.size = initial_cache_size
+        this.storage = BlockStorage(f, block_size)
+        this.block_size = this.storage.block_size
+        this.first_uncached_block = 0
+        this.cache_size = initial_cache_size
 
-    def save_state(self, f):
-        self.storage.save_state(f)
-        f.write(struct.pack('<QQQ', self.size, self.cache_size, self.first_uncached_block))
+    def save_state(this, f):
+        this.storage.save_state(f)
+        f.write(struct.pack('<QQQ', this.size, this.cache_size, this.first_uncached_block))
 
     @classmethod
     def restore_state(cls, f, state_file):
@@ -204,38 +204,38 @@ class BlockCachedFile(object):
         s = state_file.read(3 * 8)
         size, cache_size, first_uncached_block = struct.unpack('<QQQ', s)
 
-        self = cls.__new__(cls)
-        self.storage = storage
-        self.size = size
-        self.cache_size = cache_size
-        self.first_uncached_block = first_uncached_block
-        self.block_size = self.storage.block_size
-        return self
+        this = cls.__new__(cls)
+        this.storage = storage
+        this.size = size
+        this.cache_size = cache_size
+        this.first_uncached_block = first_uncached_block
+        this.block_size = this.storage.block_size
+        return this.
 
-    def _pad_file(self, new_size):
+    def _pad_file(this, new_size):
         """
         Append zero bytes that the virtual size grows to new_size
         """
-        if new_size <= self.size:
+        if new_size <= this.size:
             return
 
         # Fill remainder blocks in the file with nulls; the last
         # existing block, if partial, is implicitly null-padded
-        start, mid, end = block_range(self.size, new_size - self.size, block_size=self.block_size)
+        start, mid, end = block_range(this.size, new_size - this.size, block_size=this.block_size)
 
         if start is not None and start[1] == 0:
-            self.storage[start[0]] = None
+            this.storage[start[0]] = None
 
         if mid is not None:
             for idx in range(*mid):
-                self.storage[idx] = None
+                this.storage[idx] = None
 
         if end is not None:
-            self.storage[end[0]] = None
+            this.storage[end[0]] = None
 
-        self.size = new_size
+        this.size = new_size
 
-    def receive_cached_data(self, offset, data_list):
+    def receive_cached_data(this, offset, data_list):
         """
         Write full data blocks to file, unless they were not written
         yet. Returns (new_offset, new_data_list) containing unused,
@@ -243,8 +243,8 @@ class BlockCachedFile(object):
         """
         data_size = sum(len(data) for data in data_list)
 
-        start, mid, end = block_range(offset, data_size, last_pos=self.cache_size,
-                                      block_size=self.block_size)
+        start, mid, end = block_range(offset, data_size, last_pos=this.cache_size,
+                                      block_size=this.block_size)
 
         if mid is None:
             # not enough data for full blocks
@@ -255,16 +255,16 @@ class BlockCachedFile(object):
         i = 0
         if start is not None:
             # skip initial part
-            i = self.block_size - start[1]
+            i = this.block_size - start[1]
 
         for j in range(*mid):
-            if j not in self.storage:
-                block = data[i:i+self.block_size]
-                self.storage[j] = block
-            i += min(self.block_size, data_size - i)
+            if j not in this.storage:
+                block = data[i:i+this.block_size]
+                this.storage[j] = block
+            i += min(this.block_size, data_size - i)
 
-        if mid[0] <= self.first_uncached_block:
-            self.first_uncached_block = max(self.first_uncached_block, mid[1])
+        if mid[0] <= this.first_uncached_block:
+            this.first_uncached_block = max(this.first_uncached_block, mid[1])
 
         # Return trailing data for possible future use
         if i < data_size:
@@ -274,87 +274,87 @@ class BlockCachedFile(object):
         offset += i
         return (offset, data_list)
 
-    def get_size(self):
-        return self.size
+    def get_size(this):
+        return this.size
 
-    def get_file(self):
+    def get_file(this):
         # Pad file to full size before returning file handle
-        self._pad_file(self.get_size())
-        return BlockCachedFileHandle(self)
+        this._pad_file(this.get_size())
+        return BlockCachedFileHandle(this)
 
-    def close(self):
-        self.storage.f.close()
-        self.storage = None
+    def close(this):
+        this.storage.f.close()
+        this.storage = None
 
-    def truncate(self, size):
-        if size < self.size:
-            self.storage.truncate(ceildiv(size, self.block_size))
-            self.size = size
-        elif size > self.size:
-            self._pad_file(size)
+    def truncate(this, size):
+        if size < this.size:
+            this.storage.truncate(ceildiv(size, this.block_size))
+            this.size = size
+        elif size > this.size:
+            this._pad_file(size)
 
-        self.cache_size = min(self.cache_size, size)
+        this.cache_size = min(this.cache_size, size)
 
-    def write(self, offset, data):
-        if offset > self.size:
+    def write(this, offset, data):
+        if offset > this.size:
             # Explicit POSIX behavior for write-past-end
-            self._pad_file(offset)
+            this._pad_file(offset)
 
         if len(data) == 0:
             # noop
             return
 
         # Perform write
-        start, mid, end = block_range(offset, len(data), block_size=self.block_size)
+        start, mid, end = block_range(offset, len(data), block_size=this.block_size)
 
         # Pad virtual size
-        self._pad_file(offset + len(data))
+        this._pad_file(offset + len(data))
 
         # Write first block
         if start is not None:
-            block = self.storage[start[0]]
+            block = this.storage[start[0]]
             i = start[2] - start[1]
-            self.storage[start[0]] = block[:start[1]] + data[:i] + block[start[2]:]
+            this.storage[start[0]] = block[:start[1]] + data[:i] + block[start[2]:]
         else:
             i = 0
 
         # Write intermediate blocks
         if mid is not None:
             for idx in range(*mid):
-                self.storage[idx] = data[i:i+self.block_size]
-                i += self.block_size
+                this.storage[idx] = data[i:i+this.block_size]
+                i += this.block_size
 
         # Write last block
         if end is not None:
-            block = self.storage[end[0]]
-            self.storage[end[0]] = data[i:] + block[end[1]:]
+            block = this.storage[end[0]]
+            this.storage[end[0]] = data[i:] + block[end[1]:]
 
-    def read(self, offset, length):
-        length = max(0, min(self.size - offset, length))
+    def read(this, offset, length):
+        length = max(0, min(this.size - offset, length))
         if length == 0:
             return b''
 
         # Perform read
-        start, mid, end = block_range(offset, length, block_size=self.block_size)
+        start, mid, end = block_range(offset, length, block_size=this.block_size)
 
         datas = []
 
         # Read first block
         if start is not None:
-            datas.append(self.storage[start[0]][start[1]:start[2]])
+            datas.append(this.storage[start[0]][start[1]:start[2]])
 
         # Read intermediate blocks
         if mid is not None:
             for idx in range(*mid):
-                datas.append(self.storage[idx])
+                datas.append(this.storage[idx])
 
         # Read last block
         if end is not None:
-            datas.append(self.storage[end[0]][:end[1]])
+            datas.append(this.storage[end[0]][:end[1]])
 
         return b"".join(datas)
 
-    def pre_read(self, offset, length):
+    def pre_read(this, offset, length):
         """
         Return (offset, length) of the first cache fetch that need to be
         performed and the results fed into `receive_cached_data` before a read
@@ -363,24 +363,24 @@ class BlockCachedFile(object):
         """
 
         # Limit to inside the cached area
-        cache_end = ceildiv(self.cache_size, self.block_size) * self.block_size
+        cache_end = ceildiv(this.cache_size, this.block_size) * this.block_size
         length = max(0, min(length, cache_end - offset))
         if length == 0:
             return None
 
         # Find bounds of the read operation
-        start_block = offset//self.block_size
-        end_block = ceildiv(offset + length, self.block_size)
+        start_block = offset//this.block_size
+        end_block = ceildiv(offset + length, this.block_size)
 
         # Combine consequent blocks into a single read
-        j = max(start_block, self.first_uncached_block)
-        while j < end_block and j in self.storage:
+        j = max(start_block, this.first_uncached_block)
+        while j < end_block and j in this.storage:
             j += 1
         if j >= end_block:
             return None
 
         for k in range(j+1, end_block):
-            if k in self.storage:
+            if k in this.storage:
                 end = k
                 break
         else:
@@ -389,26 +389,26 @@ class BlockCachedFile(object):
         if j >= end:
             return None
 
-        start_pos = j * self.block_size
-        end_pos = end * self.block_size
-        if start_pos < self.cache_size:
-            return (start_pos, min(end_pos, self.cache_size) - start_pos)
+        start_pos = j * this.block_size
+        end_pos = end * this.block_size
+        if start_pos < this.cache_size:
+            return (start_pos, min(end_pos, this.cache_size) - start_pos)
 
         return None
 
-    def pre_write(self, offset, length):
+    def pre_write(this, offset, length):
         """
         Similarly to pre_read, but for write operations.
         """
-        start, mid, end = block_range(offset, length, block_size=self.block_size)
+        start, mid, end = block_range(offset, length, block_size=this.block_size)
 
         # Writes only need partially available blocks to be in the cache
         for item in (start, end):
-            if item is not None and item[0] >= self.first_uncached_block and item[0] not in self.storage:
-                start_pos = item[0] * self.block_size
-                end_pos = (item[0] + 1) * self.block_size
-                if start_pos < self.cache_size:
-                    return (start_pos, min(self.cache_size, end_pos) - start_pos)
+            if item is not None and item[0] >= this.first_uncached_block and item[0] not in this.storage:
+                start_pos = item[0] * this.block_size
+                end_pos = (item[0] + 1) * this.block_size
+                if start_pos < this.cache_size:
+                    return (start_pos, min(this.cache_size, end_pos) - start_pos)
 
         # No reads required
         return None
@@ -418,25 +418,25 @@ class BlockCachedFileHandle(object):
     """
     Read-only access to BlockCachedFile, as if it was a contiguous file
     """
-    def __init__(self, block_cached_file):
-        self.block_cached_file = block_cached_file
-        self.pos = 0
+    def __init__(this, block_cached_file):
+        this.block_cached_file = block_cached_file
+        this.pos = 0
 
-    def seek(self, offset, whence=0):
+    def seek(this, offset, whence=0):
         if whence == 0:
-            self.pos = offset
+            this.pos = offset
         elif whence == 1:
-            self.pos += offset
+            this.pos += offset
         elif whence == 2:
-            self.pos = offset + self.block_cached_file.get_size()
+            this.pos = offset + this.block_cached_file.get_size()
         else:
             raise ValueError("Invalid whence")
 
-    def read(self, size=None):
+    def read(this, size=None):
         if size is None:
-            size = max(0, self.block_cached_file.get_size() - self.pos)
-        data = self.block_cached_file.read(self.pos, size)
-        self.pos += len(data)
+            size = max(0, this.block_cached_file.get_size() - this.pos)
+        data = this.block_cached_file.read(this.pos, size)
+        this.pos += len(data)
         return data
 
 

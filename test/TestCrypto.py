@@ -1,52 +1,45 @@
 import os
-import tempfile
 import shutil
 import random
 import threading
 
-from .tools import assert_equal, assert_raises
+from StandardTestFixture import StandardTestFixture
 
 from tahoestaticfs.crypto import CryptFile
 
+class TestCryptFile(StandardTestFixture):
 
-class TestCryptFile(object):
-    def setup_method(self):
-        self.tmpdir = tempfile.mkdtemp()
-        self.file_name = os.path.join(self.tmpdir, 'test.dat')
 
-    def teardown_method(self):
-        shutil.rmtree(self.tmpdir)
-
-    def test_create(self):
+    def test_create(this):
         # Test file creation in the different modes
         key = b'a'*32
 
-        f = CryptFile(self.file_name, key=key, mode='w+b', block_size=32)
+        f = CryptFile(this.file_name, key=key, mode='w+b', block_size=32)
         f.write(b'foo')
         f.seek(0)
-        assert_equal(f.read(), b'foo')
+        this.assert_equal(f.read(), b'foo')
         f.close()
 
-        f = CryptFile(self.file_name, key=key, mode='rb', block_size=32)
-        assert_equal(f.read(), b'foo')
-        assert_raises(IOError, f.write, b'bar')
+        f = CryptFile(this.file_name, key=key, mode='rb', block_size=32)
+        this.assert_equal(f.read(), b'foo')
+        this.assert_raises(IOError, f.write, b'bar')
         f.close()
 
-        f = CryptFile(self.file_name, key=key, mode='r+b', block_size=32)
-        assert_equal(f.read(), b'foo')
+        f = CryptFile(this.file_name, key=key, mode='r+b', block_size=32)
+        this.assert_equal(f.read(), b'foo')
         f.write(b'bar')
-        assert_equal(f.read(), b'')
+        this.assert_equal(f.read(), b'')
         f.seek(0)
-        assert_equal(f.read(), b'foobar')
+        this.assert_equal(f.read(), b'foobar')
         f.close()
 
-        f = CryptFile(self.file_name, key=key, mode='w+b', block_size=32)
+        f = CryptFile(this.file_name, key=key, mode='w+b', block_size=32)
         f.seek(0)
-        assert_equal(f.read(), b'')
+        this.assert_equal(f.read(), b'')
         f.close()
 
-    def test_random_rw(self):
-        file_name = self.file_name
+    def test_random_rw(this):
+        file_name = this.file_name
         file_size = 1000000
         test_data = os.urandom(file_size)
         key = b"a"*32
@@ -55,7 +48,7 @@ class TestCryptFile(object):
         f.write(test_data)
         f.close()
 
-        f = CryptFile(self.file_name, key=key, mode='r+b')
+        f = CryptFile(this.file_name, key=key, mode='r+b')
 
         random.seed(1234)
 
@@ -69,64 +62,64 @@ class TestCryptFile(object):
                 # read op
                 f.seek(a)
                 data = f.read(b - a)
-                assert_equal(data, test_data[a:b])
+                this.assert_equal(data, test_data[a:b])
             else:
                 # write op
                 f.seek(a)
                 f.write(test_data[a:b])
 
-    def test_write_past_end(self):
+    def test_write_past_end(this):
         # Check that write-past-end has POSIX semantics
         key = b"a"*32
-        with CryptFile(self.file_name, key=key, mode='w+b', block_size=32) as f:
+        with CryptFile(this.file_name, key=key, mode='w+b', block_size=32) as f:
             f.seek(12)
             f.write(b"abba")
             f.seek(0)
-            assert_equal(f.read(), b"\x00"*12 + b"abba")
+            this.assert_equal(f.read(), b"\x00"*12 + b"abba")
 
-    def test_seek(self):
+    def test_seek(this):
         # Check that seeking works as expected
         key = b"a"*32
-        with CryptFile(self.file_name, key=key, mode='w+b', block_size=32) as f:
+        with CryptFile(this.file_name, key=key, mode='w+b', block_size=32) as f:
             f.seek(2, 0)
             f.write(b"a")
             f.seek(-2, 2)
-            assert_equal(f.read(2), b"\x00a")
+            this.assert_equal(f.read(2), b"\x00a")
             f.seek(0, 2)
             f.write(b"c")
             f.seek(-2, 1)
-            assert_equal(f.read(2), b"ac")
+            this.assert_equal(f.read(2), b"ac")
 
-    def test_truncate(self):
+    def test_truncate(this):
         # Check that truncate() works as expected
         key = b"a"*32
-        f = CryptFile(self.file_name, key=key, mode='w+b', block_size=32)
+        f = CryptFile(this.file_name, key=key, mode='w+b', block_size=32)
         f.write(b"b"*1237)
         f.truncate(15)
         f.seek(0)
-        assert_equal(f.read(), b"b"*15)
+        this.assert_equal(f.read(), b"b"*15)
         f.truncate(31)
         f.seek(0)
-        assert_equal(f.read(), b"b"*15 + b"\x00"*16)
+        this.assert_equal(f.read(), b"b"*15 + b"\x00"*16)
         f.truncate(0)
         f.seek(0)
-        assert_equal(len(f.read()), 0)
+        this.assert_equal(len(f.read()), 0)
         f.close()
 
-    def test_locking(self):
+    def test_locking(this):
         # Check that POSIX locking serializes access to the file
 
         key = b"a"*32
         last_data = [None]
 
         def run():
-            f = CryptFile(self.file_name, key=key, mode='r+b', block_size=32)
+            f = CryptFile(this.file_name, key=key, mode='r+b', block_size=32)
             f.truncate(0)
             last_data[0] = os.urandom(16)
             f.write(last_data[0])
             f.close()
 
-        f = CryptFile(self.file_name, key=key, mode='w+b', block_size=32)
+        f = CryptFile(this.file_name, key=key, mode='w+b', block_size=32)
         last_data[0] = os.urandom(16)
         f.write(last_data[0])
 
@@ -139,24 +132,24 @@ class TestCryptFile(object):
         for t in threads:
             t.join()
 
-        f = CryptFile(self.file_name, key=key, mode='rb', block_size=32)
+        f = CryptFile(this.file_name, key=key, mode='rb', block_size=32)
         data = f.read()
         f.close()
 
-        assert_equal(data, last_data[0])
+        this.assert_equal(data, last_data[0])
 
-    def test_data_sizes(self):
+    def test_data_sizes(this):
         key = b"a"*32
 
         for data_size in range(5*32):
             data = os.urandom(data_size)
 
-            f = CryptFile(self.file_name, key=key, mode='w+b', block_size=32)
+            f = CryptFile(this.file_name, key=key, mode='w+b', block_size=32)
             f.write(data)
             f.close()
 
-            f = CryptFile(self.file_name, key=key, mode='rb', block_size=32)
+            f = CryptFile(this.file_name, key=key, mode='rb', block_size=32)
             data2 = f.read()
             f.close()
 
-            assert_equal(data2, data, repr((data, data_size)))
+            this.assert_equal(data2, data, repr((data, data_size)))

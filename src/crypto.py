@@ -25,9 +25,9 @@ class CryptFile(object):
     IV_SIZE = 16
     HEADER_SIZE = IV_SIZE + 16
 
-    def __init__(self, path, key, mode='r+b', block_size=BLOCK_SIZE):
-        self.key = None
-        self.path = path
+    def __init__(this, path, key, mode='r+b', block_size=BLOCK_SIZE):
+        this.key = None
+        this.path = path
 
         if len(key) != 32:
             raise ValueError("Key must be 32 bytes")
@@ -52,274 +52,274 @@ class CryptFile(object):
                 # Truncate after locking
                 os.ftruncate(fd, 0)
 
-            self.fp = os.fdopen(fd, mode)
+            this.fp = os.fdopen(fd, mode)
         except:
             os.close(fd)
             raise
 
-        self.mode = mode
-        self.key = key
+        this.mode = mode
+        this.key = key
 
         assert algorithms.AES.block_size//8 == 16
 
         if block_size % 16 != 0:
             raise ValueError("Block size must be multiple of AES block size")
-        self.block_size = block_size
+        this.block_size = block_size
 
         if mode == 'w+b':
-            self.data_size = 0
+            this.data_size = 0
         else:
             # Read header
             try:
-                iv = self.fp.read(self.IV_SIZE)
-                if len(iv) != self.IV_SIZE:
+                iv = this.fp.read(this.IV_SIZE)
+                if len(iv) != this.IV_SIZE:
                     raise ValueError()
 
-                cipher = Cipher(algorithms.AES(self.key), modes.CBC(iv), backend=backend)
+                cipher = Cipher(algorithms.AES(this.key), modes.CBC(iv), backend=backend)
                 decryptor = cipher.decryptor()
 
-                ciphertext = self.fp.read(16)
+                ciphertext = this.fp.read(16)
                 if len(ciphertext) != 16:
                     raise ValueError()
                 data = decryptor.update(ciphertext) + decryptor.finalize()
-                self.data_size = struct.unpack('<Q', data[8:])[0]
+                this.data_size = struct.unpack('<Q', data[8:])[0]
 
                 # Check the data size is OK
-                self.fp.seek(0, 2)
-                file_size = self.fp.tell()
-                num_blocks, remainder = divmod(file_size - self.HEADER_SIZE, self.IV_SIZE + block_size)
+                this.fp.seek(0, 2)
+                file_size = this.fp.tell()
+                num_blocks, remainder = divmod(file_size - this.HEADER_SIZE, this.IV_SIZE + block_size)
                 if remainder > 0:
                     num_blocks += 1
-                if self.data_size == 0 and num_blocks == 1:
+                if this.data_size == 0 and num_blocks == 1:
                     # Zero-size files can contain 0 or 1 data blocks
                     num_blocks = 0
-                if not ((num_blocks-1)*block_size < self.data_size <= num_blocks*block_size):
+                if not ((num_blocks-1)*block_size < this.data_size <= num_blocks*block_size):
                     raise ValueError()
             except (IOError, struct.error, ValueError):
-                self.fp.close()
+                this.fp.close()
                 raise ValueError("invalid header data in file")
 
-        self.current_block = -1
-        self.block_cache = b""
-        self.block_dirty = False
+        this.current_block = -1
+        this.block_cache = b""
+        this.block_dirty = False
 
-        self.offset = 0
+        this.offset = 0
 
-    def _write_header(self):
-        iv = os.urandom(self.IV_SIZE)
-        cipher = Cipher(algorithms.AES(self.key), modes.CBC(iv), backend=backend)
+    def _write_header(this):
+        iv = os.urandom(this.IV_SIZE)
+        cipher = Cipher(algorithms.AES(this.key), modes.CBC(iv), backend=backend)
         encryptor = cipher.encryptor()
 
-        self.fp.seek(0)
-        self.fp.write(iv)
+        this.fp.seek(0)
+        this.fp.write(iv)
 
-        data = os.urandom(8) + struct.pack("<Q", self.data_size)
-        self.fp.write(encryptor.update(data))
-        self.fp.write(encryptor.finalize())
+        data = os.urandom(8) + struct.pack("<Q", this.data_size)
+        this.fp.write(encryptor.update(data))
+        this.fp.write(encryptor.finalize())
 
-    def _flush_block(self):
-        if self.current_block < 0:
+    def _flush_block(this):
+        if this.current_block < 0:
             return
-        if not self.block_dirty:
+        if not this.block_dirty:
             return
 
-        iv = os.urandom(self.IV_SIZE)
-        cipher = Cipher(algorithms.AES(self.key), modes.CBC(iv), backend=backend)
+        iv = os.urandom(this.IV_SIZE)
+        cipher = Cipher(algorithms.AES(this.key), modes.CBC(iv), backend=backend)
         encryptor = cipher.encryptor()
 
-        self.fp.seek(self.HEADER_SIZE + self.current_block * (self.IV_SIZE + self.block_size))
-        self.fp.write(iv)
+        this.fp.seek(this.HEADER_SIZE + this.current_block * (this.IV_SIZE + this.block_size))
+        this.fp.write(iv)
 
-        off = (len(self.block_cache) % 16)
+        off = (len(this.block_cache) % 16)
         if off == 0:
-            self.fp.write(encryptor.update(bytes(self.block_cache)))
+            this.fp.write(encryptor.update(bytes(this.block_cache)))
         else:
             # insert random padding
-            self.fp.write(encryptor.update(bytes(self.block_cache) + os.urandom(16-off)))
-        self.fp.write(encryptor.finalize())
+            this.fp.write(encryptor.update(bytes(this.block_cache) + os.urandom(16-off)))
+        this.fp.write(encryptor.finalize())
 
-        self.block_dirty = False
+        this.block_dirty = False
 
-    def _load_block(self, i):
-        if i == self.current_block:
+    def _load_block(this, i):
+        if i == this.current_block:
             return
 
-        self._flush_block()
+        this._flush_block()
 
-        self.fp.seek(self.HEADER_SIZE + i * (self.IV_SIZE + self.block_size))
-        iv = self.fp.read(self.IV_SIZE)
+        this.fp.seek(this.HEADER_SIZE + i * (this.IV_SIZE + this.block_size))
+        iv = this.fp.read(this.IV_SIZE)
 
         if not iv:
             # Block does not exist, past end of file
-            self.current_block = i
-            self.block_cache = b""
-            self.block_dirty = False
+            this.current_block = i
+            this.block_cache = b""
+            this.block_dirty = False
             return
 
-        ciphertext = self.fp.read(self.block_size)
-        cipher = Cipher(algorithms.AES(self.key), modes.CBC(iv), backend=backend)
+        ciphertext = this.fp.read(this.block_size)
+        cipher = Cipher(algorithms.AES(this.key), modes.CBC(iv), backend=backend)
         decryptor = cipher.decryptor()
 
-        if (i+1)*self.block_size > self.data_size:
-            size = self.data_size - i*self.block_size
+        if (i+1)*this.block_size > this.data_size:
+            size = this.data_size - i*this.block_size
         else:
-            size = self.block_size
+            size = this.block_size
 
-        self.current_block = i
-        self.block_cache = (decryptor.update(ciphertext) + decryptor.finalize())[:size]
-        self.block_dirty = False
+        this.current_block = i
+        this.block_cache = (decryptor.update(ciphertext) + decryptor.finalize())[:size]
+        this.block_dirty = False
 
-    def seek(self, offset, whence=0):
+    def seek(this, offset, whence=0):
         if whence == 0:
             pass
         elif whence == 1:
-            offset = self.offset + offset
+            offset = this.offset + offset
         elif whence == 2:
-            offset += self.data_size
+            offset += this.data_size
         else:
             raise IOError(errno.EINVAL, "Invalid whence")
         if offset < 0:
             raise IOError(errno.EINVAL, "Invalid offset")
-        self.offset = offset
+        this.offset = offset
 
-    def tell(self):
-        return self.offset
+    def tell(this):
+        return this.offset
 
-    def _get_file_size(self):
-        self.fp.seek(0, 2)
-        return self.fp.tell()
+    def _get_file_size(this):
+        this.fp.seek(0, 2)
+        return this.fp.tell()
 
-    def _read(self, size, offset):
+    def _read(this, size, offset):
         if size is None:
-            size = self.data_size - offset
+            size = this.data_size - offset
         if size <= 0:
             return b""
 
-        start_block, start_off = divmod(offset, self.block_size)
-        end_block, end_off = divmod(offset + size, self.block_size)
+        start_block, start_off = divmod(offset, this.block_size)
+        end_block, end_off = divmod(offset + size, this.block_size)
         if end_off != 0:
             end_block += 1
 
         # Read and decrypt data
         data = []
         for i in range(start_block, end_block):
-            self._load_block(i)
-            data.append(self.block_cache)
+            this._load_block(i)
+            data.append(this.block_cache)
 
         if end_off != 0:
             data[-1] = data[-1][:end_off]
         data[0] = data[0][start_off:]
         return b"".join(map(bytes, data))
 
-    def _write(self, data, offset):
+    def _write(this, data, offset):
         size = len(data)
-        start_block, start_off = divmod(offset, self.block_size)
-        end_block, end_off = divmod(offset + size, self.block_size)
+        start_block, start_off = divmod(offset, this.block_size)
+        end_block, end_off = divmod(offset + size, this.block_size)
 
         k = 0
 
-        if self.mode == 'rb':
+        if this.mode == 'rb':
             raise IOError(errno.EACCES, "Write to a read-only file")
 
         # Write first block, if partial
         if start_off != 0 or end_block == start_block:
-            self._load_block(start_block)
-            data_block = data[:(self.block_size - start_off)]
-            self.block_cache = self.block_cache[:start_off] + data_block + self.block_cache[start_off+len(data_block):]
-            self.block_dirty = True
+            this._load_block(start_block)
+            data_block = data[:(this.block_size - start_off)]
+            this.block_cache = this.block_cache[:start_off] + data_block + this.block_cache[start_off+len(data_block):]
+            this.block_dirty = True
             k += 1
             start_block += 1
 
         # Write full blocks
         for i in range(start_block, end_block):
-            if self.current_block != i:
-                self._flush_block()
-            self.current_block = i
-            self.block_cache = data[k*self.block_size-start_off:(k+1)*self.block_size-start_off]
-            self.block_dirty = True
+            if this.current_block != i:
+                this._flush_block()
+            this.current_block = i
+            this.block_cache = data[k*this.block_size-start_off:(k+1)*this.block_size-start_off]
+            this.block_dirty = True
             k += 1
 
         # Write last partial block
         if end_block > start_block and end_off != 0:
-            self._load_block(end_block)
-            data_block = data[k*self.block_size-start_off:(k+1)*self.block_size-start_off]
-            self.block_cache = data_block + self.block_cache[len(data_block):]
-            self.block_dirty = True
+            this._load_block(end_block)
+            data_block = data[k*this.block_size-start_off:(k+1)*this.block_size-start_off]
+            this.block_cache = data_block + this.block_cache[len(data_block):]
+            this.block_dirty = True
 
-        self.data_size = max(self.data_size, offset + len(data))
+        this.data_size = max(this.data_size, offset + len(data))
 
-    def read(self, size=None):
-        data = self._read(size, self.offset)
-        self.offset += len(data)
+    def read(this, size=None):
+        data = this._read(size, this.offset)
+        this.offset += len(data)
         return data
 
-    def write(self, data):
-        if self.data_size < self.offset:
+    def write(this, data):
+        if this.data_size < this.offset:
             # Write past end
-            s = NullString(self.offset - self.data_size)
-            self._write(s, self.data_size)
+            s = NullString(this.offset - this.data_size)
+            this._write(s, this.data_size)
 
-        self._write(data, self.offset)
-        self.offset += len(data)
+        this._write(data, this.offset)
+        this.offset += len(data)
 
-    def truncate(self, size):
-        last_block, last_off = divmod(size, self.block_size)
+    def truncate(this, size):
+        last_block, last_off = divmod(size, this.block_size)
 
-        self._load_block(last_block)
-        last_block_data = self.block_cache
+        this._load_block(last_block)
+        last_block_data = this.block_cache
 
         # truncate to block boundary
-        self._flush_block()
-        sz = self.HEADER_SIZE + last_block * (self.IV_SIZE + self.block_size)
-        self.fp.truncate(sz)
-        self.data_size = last_block * self.block_size
-        self.current_block = -1
-        self.block_cache = b""
-        self.block_dirty = False
+        this._flush_block()
+        sz = this.HEADER_SIZE + last_block * (this.IV_SIZE + this.block_size)
+        this.fp.truncate(sz)
+        this.data_size = last_block * this.block_size
+        this.current_block = -1
+        this.block_cache = b""
+        this.block_dirty = False
 
         # rewrite the last block
         if last_off != 0:
-            self._write(last_block_data[:last_off], self.data_size)
+            this._write(last_block_data[:last_off], this.data_size)
 
         # add null padding
-        if self.data_size < size:
-            s = NullString(size - self.data_size)
-            self._write(s, self.data_size)
+        if this.data_size < size:
+            s = NullString(size - this.data_size)
+            this._write(s, this.data_size)
 
-    def __enter__(self):
-        return self
+    def __enter__(this):
+        return this.
 
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.close()
+    def __exit__(this, exc_type, exc_value, traceback):
+        this.close()
         return False
 
-    def flush(self):
-        if self.mode != 'rb':
-            self._flush_block()
-            self._write_header()
-        self.fp.flush()
+    def flush(this):
+        if this.mode != 'rb':
+            this._flush_block()
+            this._write_header()
+        this.fp.flush()
 
-    def close(self):
-        if self.key is None:
+    def close(this):
+        if this.key is None:
             return
-        if self.mode != 'rb':
-            self.flush()
-        self.fp.close()
-        self.key = None
+        if this.mode != 'rb':
+            this.flush()
+        this.fp.close()
+        this.key = None
 
-    def __del__(self):
-        self.close()
+    def __del__(this):
+        this.close()
 
 
 class NullString(object):
-    def __init__(self, size):
-        self.size = size
+    def __init__(this, size):
+        this.size = size
 
-    def __len__(self):
-        return self.size
+    def __len__(this):
+        return this.size
 
-    def __getitem__(self, k):
+    def __getitem__(this, k):
         if isinstance(k, slice):
-            return b"\x00" * len(range(*k.indices(self.size)))
+            return b"\x00" * len(range(*k.indices(this.size)))
         else:
             raise IndexError("invalid index")

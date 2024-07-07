@@ -22,7 +22,7 @@ from .blockcache import BlockCachedFile
 
 
 class CacheDB(object):
-    def __init__(self, path, rootcap, node_url, cache_size, cache_data,
+    def __init__(this, path, rootcap, node_url, cache_size, cache_data,
                  read_lifetime, write_lifetime):
         path = os.path.abspath(path)
         if not os.path.isdir(path):
@@ -30,30 +30,30 @@ class CacheDB(object):
 
         assert isinstance(rootcap, str)
 
-        self.cache_size = cache_size
-        self.cache_data = cache_data
-        self.read_lifetime = read_lifetime
-        self.write_lifetime = write_lifetime
+        this.cache_size = cache_size
+        this.cache_data = cache_data
+        this.read_lifetime = read_lifetime
+        this.write_lifetime = write_lifetime
 
-        self.path = path
-        self.key, self.salt_hkdf = self._generate_prk(rootcap)
+        this.path = path
+        this.key, this.salt_hkdf = this._generate_prk(rootcap)
 
-        self.last_size_check_time = 0
+        this.last_size_check_time = 0
 
         # Cache lock
-        self.lock = threading.RLock()
+        this.lock = threading.RLock()
 
         # Open files and dirs
-        self.open_items = {}
+        this.open_items = {}
 
         # Restrict cache size
-        self._restrict_size()
+        this._restrict_size()
 
         # Directory cache
-        self._max_item_cache = 500
-        self._item_cache = []
+        this._max_item_cache = 500
+        this._item_cache = []
 
-    def _generate_prk(self, rootcap):
+    def _generate_prk(this, rootcap):
         # Cache master key is derived from hashed rootcap and salt via
         # PBKDF2, with a fixed number of iterations.
         #
@@ -61,7 +61,7 @@ class CacheDB(object):
         # used to generate per-file keys via HKDF-SHA256
 
         # Get salt
-        salt_fn = os.path.join(self.path, 'salt')
+        salt_fn = os.path.join(this.path, 'salt')
         try:
             with open(salt_fn, 'rb') as f:
                 numiter = f.read(4)
@@ -112,7 +112,7 @@ class CacheDB(object):
         # HKDF private key material for per-file keys
         return key, salt_hkdf
 
-    def _walk_cache_subtree(self, root_upath=""):
+    def _walk_cache_subtree(this, root_upath=""):
         """
         Walk through items in the cached directory tree, starting from
         the given root point.
@@ -126,7 +126,7 @@ class CacheDB(object):
         stack = []
 
         # Start from root
-        fn, key = self.get_filename_and_key(root_upath)
+        fn, key = this.get_filename_and_key(root_upath)
         if os.path.isfile(fn):
             stack.append((root_upath, fn, key))
 
@@ -152,50 +152,50 @@ class CacheDB(object):
             for c_fn, c_info in children:
                 c_upath = os.path.join(upath, c_fn)
                 if c_info[0] == 'dirnode':
-                    c_fn, c_key = self.get_filename_and_key(c_upath)
+                    c_fn, c_key = this.get_filename_and_key(c_upath)
                     if os.path.isfile(c_fn):
                         stack.append((c_upath, c_fn, c_key))
                 elif c_info[0] == 'filenode':
                     for ext in (None, b'state', b'data'):
-                        c_fn, c_key = self.get_filename_and_key(c_upath, ext=ext)
+                        c_fn, c_key = this.get_filename_and_key(c_upath, ext=ext)
                         yield (os.path.basename(c_fn), c_upath)
 
-    def _restrict_size(self):
+    def _restrict_size(this):
         def get_cache_score(entry):
             fn, st = entry
             return -cache_score(size=st.st_size, t=now-st.st_mtime)
 
-        with self.lock:
+        with this.lock:
             now = time.time()
-            if now < self.last_size_check_time + 60:
+            if now < this.last_size_check_time + 60:
                 return
 
-            self.last_size_check_time = now
+            this.last_size_check_time = now
 
-            files = [os.path.join(self.path, fn) 
-                     for fn in os.listdir(self.path) 
+            files = [os.path.join(this.path, fn) 
+                     for fn in os.listdir(this.path) 
                      if fn != "salt"]
             entries = [(fn, os.stat(fn)) for fn in files]
             entries.sort(key=get_cache_score)
 
             tot_size = 0
             for fn, st in entries:
-                if tot_size + st.st_size > self.cache_size:
+                if tot_size + st.st_size > this.cache_size:
                     # unlink
                     os.unlink(fn)
                 else:
                     tot_size += st.st_size
 
-    def _invalidate(self, root_upath="", shallow=False):
+    def _invalidate(this, root_upath="", shallow=False):
         if root_upath == "" and not shallow:
-            for f in self.open_items.values():
+            for f in this.open_items.values():
                 f.invalidated = True
-            self.open_items = {}
-            dead_file_set = os.listdir(self.path)
+            this.open_items = {}
+            dead_file_set = os.listdir(this.path)
         else:
             dead_file_set = set()
-            for fn, upath in self._walk_cache_subtree(root_upath):
-                f = self.open_items.pop(upath, None)
+            for fn, upath in this._walk_cache_subtree(root_upath):
+                f = this.open_items.pop(upath, None)
                 if f is not None:
                     f.invalidated = True
                 dead_file_set.add(fn)
@@ -205,63 +205,63 @@ class CacheDB(object):
         for basename in dead_file_set:
             if basename == 'salt':
                 continue
-            fn = os.path.join(self.path, basename)
+            fn = os.path.join(this.path, basename)
             if os.path.isfile(fn):
                 os.unlink(fn)
 
-    def invalidate(self, root_upath="", shallow=False):
-        with self.lock:
-            self._invalidate(root_upath, shallow=shallow)
+    def invalidate(this, root_upath="", shallow=False):
+        with this.lock:
+            this._invalidate(root_upath, shallow=shallow)
 
-    def open_file(self, upath, io, flags, lifetime=None):
-        with self.lock:
+    def open_file(this, upath, io, flags, lifetime=None):
+        with this.lock:
             writeable = (flags & (os.O_RDONLY | os.O_RDWR | os.O_WRONLY)) in (os.O_RDWR, os.O_WRONLY)
             if writeable:
                 # Drop file data cache before opening in write mode
-                if upath not in self.open_items:
-                    self.invalidate(upath)
+                if upath not in this.open_items:
+                    this.invalidate(upath)
 
                 # Limit e.g. parent directory lookup lifetime
                 if lifetime is None:
-                    lifetime = self.write_lifetime
+                    lifetime = this.write_lifetime
 
-            f = self.get_file_inode(upath, io,
+            f = this.get_file_inode(upath, io,
                                     excl=(flags & os.O_EXCL),
                                     creat=(flags & os.O_CREAT),
                                     lifetime=lifetime)
             return CachedFileHandle(upath, f, flags)
 
-    def open_dir(self, upath, io, lifetime=None):
-        with self.lock:
-            f = self.get_dir_inode(upath, io, lifetime=lifetime)
+    def open_dir(this, upath, io, lifetime=None):
+        with this.lock:
+            f = this.get_dir_inode(upath, io, lifetime=lifetime)
             return CachedDirHandle(upath, f)
 
-    def close_file(self, f):
-        with self.lock:
+    def close_file(this, f):
+        with this.lock:
             c = f.inode
             upath = f.upath
             f.close()
             if c.closed:
-                if upath in self.open_items:
-                    del self.open_items[upath]
-                self._restrict_size()
+                if upath in this.open_items:
+                    del this.open_items[upath]
+                this._restrict_size()
 
-    def close_dir(self, f):
-        with self.lock:
+    def close_dir(this, f):
+        with this.lock:
             c = f.inode
             upath = f.upath
             f.close()
             if c.closed:
-                if upath in self.open_items:
-                    del self.open_items[upath]
-                self._restrict_size()
+                if upath in this.open_items:
+                    del this.open_items[upath]
+                this._restrict_size()
 
-    def upload_file(self, c, io):
+    def upload_file(this, c, io):
         if isinstance(c, CachedFileHandle):
             c = c.inode
 
         if c.upath is not None and c.dirty:
-            parent = self.open_dir(udirname(c.upath), io, lifetime=self.write_lifetime)
+            parent = this.open_dir(udirname(c.upath), io, lifetime=this.write_lifetime)
             try:
                 parent_cap = parent.inode.info[1]['rw_uri']
 
@@ -272,35 +272,35 @@ class CacheDB(object):
                     # Failure to upload --- need to invalidate parent
                     # directory, since the file might not have been
                     # created.
-                    self.invalidate(parent.upath, shallow=True)
+                    this.invalidate(parent.upath, shallow=True)
                     raise
 
                 # Add in cache
-                with self.lock:
+                with this.lock:
                     parent.inode.cache_add_child(ubasename(c.upath), cap, size=c.get_size())
             finally:
-                self.close_dir(parent)
+                this.close_dir(parent)
 
-    def unlink(self, upath, io, is_dir=False):
+    def unlink(this, upath, io, is_dir=False):
         if upath == '':
             raise IOError(errno.EACCES, "cannot unlink root directory")
 
-        with self.lock:
+        with this.lock:
             # Unlink in cache
             if is_dir:
-                f = self.open_dir(upath, io, lifetime=self.write_lifetime)
+                f = this.open_dir(upath, io, lifetime=this.write_lifetime)
             else:
-                f = self.open_file(upath, io, 0, lifetime=self.write_lifetime)
+                f = this.open_file(upath, io, 0, lifetime=this.write_lifetime)
             try:
                 f.inode.unlink()
             finally:
                 if is_dir:
-                    self.close_dir(f)
+                    this.close_dir(f)
                 else:
-                    self.close_file(f)
+                    this.close_file(f)
 
             # Perform unlink
-            parent = self.open_dir(udirname(upath), io, lifetime=self.write_lifetime)
+            parent = this.open_dir(udirname(upath), io, lifetime=this.write_lifetime)
             try:
                 parent_cap = parent.inode.info[1]['rw_uri']
 
@@ -315,15 +315,15 @@ class CacheDB(object):
                 # Remove from cache
                 parent.inode.cache_remove_child(ubasename(upath))
             finally:
-                self.close_dir(parent)
+                this.close_dir(parent)
 
-    def mkdir(self, upath, io):
+    def mkdir(this, upath, io):
         if upath == '':
             raise IOError(errno.EEXIST, "cannot re-mkdir root directory")
 
-        with self.lock:
+        with this.lock:
             # Check that parent exists
-            parent = self.open_dir(udirname(upath), io, lifetime=self.write_lifetime)
+            parent = this.open_dir(udirname(upath), io, lifetime=this.write_lifetime)
             try:
                 parent_cap = parent.inode.info[1]['rw_uri']
 
@@ -339,7 +339,7 @@ class CacheDB(object):
                     raise IOError(errno.EEXIST, "directory already exists")
 
                 # Invalidate cache
-                self.invalidate(upath)
+                this.invalidate(upath)
 
                 # Perform operation
                 upath_cap = parent_cap + '/' + ubasename(upath)
@@ -351,25 +351,25 @@ class CacheDB(object):
                 # Add in cache
                 parent.inode.cache_add_child(ubasename(upath), cap, size=None)
             finally:
-                self.close_dir(parent)
+                this.close_dir(parent)
 
-    def get_attr(self, upath, io):
+    def get_attr(this, upath, io):
         if upath == '':
-            dir = self.open_dir(upath, io)
+            dir = this.open_dir(upath, io)
             try:
                 info = dir.get_attr()
             finally:
-                self.close_dir(dir)
+                this.close_dir(dir)
         else:
             upath_parent = udirname(upath)
-            dir = self.open_dir(upath_parent, io)
+            dir = this.open_dir(upath_parent, io)
             try:
                 info = dir.get_child_attr(ubasename(upath))
             except IOError as err:
-                with self.lock:
-                    if err.errno == errno.ENOENT and upath in self.open_items:
+                with this.lock:
+                    if err.errno == errno.ENOENT and upath in this.open_items:
                         # New file that has not yet been uploaded
-                        info = dict(self.open_items[upath].get_attr())
+                        info = dict(this.open_items[upath].get_attr())
                         if 'mtime' not in info:
                             info['mtime'] = time.time()
                         if 'ctime' not in info:
@@ -377,11 +377,11 @@ class CacheDB(object):
                     else:
                         raise
             finally:
-                self.close_dir(dir)
+                this.close_dir(dir)
 
-        with self.lock:
-            if upath in self.open_items:
-                info.update(self.open_items[upath].get_attr())
+        with this.lock:
+            if upath in this.open_items:
+                info.update(this.open_items[upath].get_attr())
                 if 'mtime' not in info:
                     info['mtime'] = time.time()
                 if 'ctime' not in info:
@@ -389,17 +389,17 @@ class CacheDB(object):
 
         return info
 
-    def _lookup_cap(self, upath, io, read_only=True, lifetime=None):
+    def _lookup_cap(this, upath, io, read_only=True, lifetime=None):
         if lifetime is None:
-            lifetime = self.read_lifetime
+            lifetime = this.read_lifetime
 
-        with self.lock:
-            if upath in self.open_items and self.open_items[upath].is_fresh(lifetime):
+        with this.lock:
+            if upath in this.open_items and this.open_items[upath].is_fresh(lifetime):
                 # shortcut
                 if read_only:
-                    return self.open_items[upath].info[1]['ro_uri']
+                    return this.open_items[upath].info[1]['ro_uri']
                 else:
-                    return self.open_items[upath].info[1]['rw_uri']
+                    return this.open_items[upath].info[1]['rw_uri']
             elif upath == '':
                 # root
                 return None
@@ -408,29 +408,29 @@ class CacheDB(object):
                 entry_name = ubasename(upath)
                 parent_upath = udirname(upath)
 
-                parent = self.open_dir(parent_upath, io, lifetime=lifetime)
+                parent = this.open_dir(parent_upath, io, lifetime=lifetime)
                 try:
                     if read_only:
                         return parent.get_child_attr(entry_name)['ro_uri']
                     else:
                         return parent.get_child_attr(entry_name)['rw_uri']
                 finally:
-                    self.close_dir(parent)
+                    this.close_dir(parent)
 
-    def get_file_inode(self, upath, io, excl=False, creat=False, lifetime=None):
+    def get_file_inode(this, upath, io, excl=False, creat=False, lifetime=None):
         if lifetime is None:
-            lifetime = self.read_lifetime
+            lifetime = this.read_lifetime
 
-        with self.lock:
-            f = self.open_items.get(upath)
+        with this.lock:
+            f = this.open_items.get(upath)
 
             if f is not None and not f.is_fresh(lifetime):
                 f = None
-                self.invalidate(upath, shallow=True)
+                this.invalidate(upath, shallow=True)
 
             if f is None:
                 try:
-                    cap = self._lookup_cap(upath, io, lifetime=lifetime)
+                    cap = this._lookup_cap(upath, io, lifetime=lifetime)
                 except IOError as err:
                     if err.errno == errno.ENOENT and creat:
                         cap = None
@@ -442,17 +442,17 @@ class CacheDB(object):
                 if not creat and cap is None:
                     raise IOError(errno.ENOENT, "file does not exist")
 
-                f = CachedFileInode(self, upath, io, filecap=cap, 
-                                    persistent=self.cache_data)
-                self.open_items[upath] = f
+                f = CachedFileInode(this, upath, io, filecap=cap, 
+                                    persistent=this.cache_data)
+                this.open_items[upath] = f
 
                 if cap is None:
                     # new file: add to parent inode
-                    d = self.open_dir(udirname(upath), io, lifetime=lifetime)
+                    d = this.open_dir(udirname(upath), io, lifetime=lifetime)
                     try:
                         d.inode.cache_add_child(ubasename(upath), None, size=0)
                     finally:
-                        self.close_dir(d)
+                        this.close_dir(d)
                 return f
             else:
                 if excl:
@@ -461,30 +461,30 @@ class CacheDB(object):
                     raise IOError(errno.EISDIR, "item is a directory")
                 return f
 
-    def get_dir_inode(self, upath, io, lifetime=None):
+    def get_dir_inode(this, upath, io, lifetime=None):
         if lifetime is None:
-            lifetime = self.read_lifetime
+            lifetime = this.read_lifetime
 
-        with self.lock:
-            f = self.open_items.get(upath)
+        with this.lock:
+            f = this.open_items.get(upath)
 
             if f is not None and not f.is_fresh(lifetime):
                 f = None
-                self.invalidate(upath, shallow=True)
+                this.invalidate(upath, shallow=True)
 
             if f is None:
-                cap = self._lookup_cap(upath, io, read_only=False, lifetime=lifetime)
-                f = CachedDirInode(self, upath, io, dircap=cap)
-                self.open_items[upath] = f
+                cap = this._lookup_cap(upath, io, read_only=False, lifetime=lifetime)
+                f = CachedDirInode(this, upath, io, dircap=cap)
+                this.open_items[upath] = f
 
                 # Add to item cache
                 cache_item = (time.time(), CachedDirHandle(upath, f))
-                if len(self._item_cache) < self._max_item_cache:
-                    heapq.heappush(self._item_cache, cache_item)
+                if len(this._item_cache) < this._max_item_cache:
+                    heapq.heappush(this._item_cache, cache_item)
                 else:
-                    old_time, old_fh = heapq.heapreplace(self._item_cache,
+                    old_time, old_fh = heapq.heapreplace(this._item_cache,
                                                          cache_item)
-                    self.close_dir(old_fh)
+                    this.close_dir(old_fh)
 
                 return f
             else:
@@ -492,10 +492,10 @@ class CacheDB(object):
                     raise IOError(errno.ENOTDIR, "item is a file")
                 return f
 
-    def get_upath_parent(self, path):
-        return self.get_upath(os.path.dirname(os.path.normpath(path)))
+    def get_upath_parent(this, path):
+        return this.get_upath(os.path.dirname(os.path.normpath(path)))
 
-    def get_upath(self, path):
+    def get_upath(this, path):
         assert isinstance(path, str)
         try:
             path = os.path.normpath(path)
@@ -503,10 +503,10 @@ class CacheDB(object):
         except UnicodeError:
             raise IOError(errno.ENOENT, "file does not exist")
 
-    def path_from_upath(self, upath):
+    def path_from_upath(this, upath):
         return upath.replace(os.sep, "/")
 
-    def get_filename_and_key(self, upath, ext=None):
+    def get_filename_and_key(this, upath, ext=None):
         path = upath.encode('utf-8')
         nonpath = b"//\x00" # cannot occur in path, which is normalized
 
@@ -517,10 +517,10 @@ class CacheDB(object):
 
         hkdf = HKDF(algorithm=hashes.SHA256(),
                     length=3*32,
-                    salt=self.salt_hkdf,
+                    salt=this.salt_hkdf,
                     info=info,
                     backend=backend)
-        data = hkdf.derive(self.key)
+        data = hkdf.derive(this.key)
 
         # Generate key
         key = data[:32]
@@ -529,7 +529,7 @@ class CacheDB(object):
         h = hmac.HMAC(key=data[32:], algorithm=hashes.SHA512(), backend=backend)
         h.update(info)
         fn = codecs.encode(h.finalize(), 'hex_codec').decode('ascii')
-        return os.path.join(self.path, fn), key
+        return os.path.join(this.path, fn), key
 
 
 class CachedFileHandle(object):
@@ -541,74 +541,74 @@ class CachedFileHandle(object):
     direct_io = False
     keep_cache = False
 
-    def __init__(self, upath, inode, flags):
-        self.inode = inode
-        self.inode.incref()
-        self.lock = threading.RLock()
-        self.flags = flags
-        self.upath = upath
+    def __init__(this, upath, inode, flags):
+        this.inode = inode
+        this.inode.incref()
+        this.lock = threading.RLock()
+        this.flags = flags
+        this.upath = upath
 
-        self.writeable = (self.flags & (os.O_RDONLY | os.O_RDWR | os.O_WRONLY)) in (os.O_RDWR, os.O_WRONLY)
-        self.readable = (self.flags & (os.O_RDONLY | os.O_RDWR | os.O_WRONLY)) in (os.O_RDWR, os.O_RDONLY)
-        self.append = (self.flags & os.O_APPEND)
+        this.writeable = (this.flags & (os.O_RDONLY | os.O_RDWR | os.O_WRONLY)) in (os.O_RDWR, os.O_WRONLY)
+        this.readable = (this.flags & (os.O_RDONLY | os.O_RDWR | os.O_WRONLY)) in (os.O_RDWR, os.O_RDONLY)
+        this.append = (this.flags & os.O_APPEND)
 
-        if self.flags & os.O_ASYNC:
+        if this.flags & os.O_ASYNC:
             raise IOError(errno.ENOTSUP, "O_ASYNC flag is not supported")
-        if self.flags & os.O_DIRECT:
+        if this.flags & os.O_DIRECT:
             raise IOError(errno.ENOTSUP, "O_DIRECT flag is not supported")
-        if self.flags & os.O_DIRECTORY:
+        if this.flags & os.O_DIRECTORY:
             raise IOError(errno.ENOTSUP, "O_DIRECTORY flag is not supported")
-        if self.flags & os.O_SYNC:
+        if this.flags & os.O_SYNC:
             raise IOError(errno.ENOTSUP, "O_SYNC flag is not supported")
-        if (self.flags & os.O_CREAT) and not self.writeable:
+        if (this.flags & os.O_CREAT) and not this.writeable:
             raise IOError(errno.EINVAL, "O_CREAT without writeable file")
-        if (self.flags & os.O_TRUNC) and not self.writeable:
+        if (this.flags & os.O_TRUNC) and not this.writeable:
             raise IOError(errno.EINVAL, "O_TRUNC without writeable file")
-        if (self.flags & os.O_EXCL) and not self.writeable:
+        if (this.flags & os.O_EXCL) and not this.writeable:
             raise IOError(errno.EINVAL, "O_EXCL without writeable file")
-        if (self.flags & os.O_APPEND) and not self.writeable:
+        if (this.flags & os.O_APPEND) and not this.writeable:
             raise IOError(errno.EINVAL, "O_EXCL without writeable file")
 
-        if (self.flags & os.O_TRUNC):
-            self.inode.truncate(0)
+        if (this.flags & os.O_TRUNC):
+            this.inode.truncate(0)
 
-    def close(self):
-        with self.lock:
-            if self.inode is None:
+    def close(this):
+        with this.lock:
+            if this.inode is None:
                 raise IOError(errno.EBADF, "Operation on a closed file")
-            c = self.inode
-            self.inode = None
+            c = this.inode
+            this.inode = None
             c.decref()
 
-    def read(self, io, offset, length):
-        with self.lock:
-            if self.inode is None:
+    def read(this, io, offset, length):
+        with this.lock:
+            if this.inode is None:
                 raise IOError(errno.EBADF, "Operation on a closed file")
-            if not self.readable:
+            if not this.readable:
                 raise IOError(errno.EBADF, "File not readable")
-            return self.inode.read(io, offset, length)
+            return this.inode.read(io, offset, length)
 
-    def get_size(self):
-        with self.lock:
-            return self.inode.get_size()
+    def get_size(this):
+        with this.lock:
+            return this.inode.get_size()
 
-    def write(self, io, offset, data):
-        with self.lock:
-            if self.inode is None:
+    def write(this, io, offset, data):
+        with this.lock:
+            if this.inode is None:
                 raise IOError(errno.EBADF, "Operation on a closed file")
-            if not self.writeable:
+            if not this.writeable:
                 raise IOError(errno.EBADF, "File not writeable")
-            if self.append:
+            if this.append:
                 offset = None
-            return self.inode.write(io, offset, data)
+            return this.inode.write(io, offset, data)
 
-    def truncate(self, size):
-        with self.lock:
-            if self.inode is None:
+    def truncate(this, size):
+        with this.lock:
+            if this.inode is None:
                 raise IOError(errno.EBADF, "Operation on a closed file")
-            if not self.writeable:
+            if not this.writeable:
                 raise IOError(errno.EBADF, "File not writeable")
-            return self.inode.truncate(size)
+            return this.inode.truncate(size)
 
 
 class CachedDirHandle(object):
@@ -616,37 +616,37 @@ class CachedDirHandle(object):
     Logical directory handle.
     """
 
-    def __init__(self, upath, inode):
-        self.inode = inode
-        self.inode.incref()
-        self.lock = threading.RLock()
-        self.upath = upath
+    def __init__(this, upath, inode):
+        this.inode = inode
+        this.inode.incref()
+        this.lock = threading.RLock()
+        this.upath = upath
 
-    def close(self):
-        with self.lock:
-            if self.inode is None:
+    def close(this):
+        with this.lock:
+            if this.inode is None:
                 raise IOError(errno.EBADF, "Operation on a closed dir")
-            c = self.inode
-            self.inode = None
+            c = this.inode
+            this.inode = None
             c.decref()
 
-    def listdir(self):
-        with self.lock:
-            if self.inode is None:
+    def listdir(this):
+        with this.lock:
+            if this.inode is None:
                 raise IOError(errno.EBADF, "Operation on a closed dir")
-            return self.inode.listdir()
+            return this.inode.listdir()
 
-    def get_attr(self):
-        with self.lock:
-            if self.inode is None:
+    def get_attr(this):
+        with this.lock:
+            if this.inode is None:
                 raise IOError(errno.EBADF, "Operation on a closed dir")
-            return self.inode.get_attr()
+            return this.inode.get_attr()
 
-    def get_child_attr(self, childname):
-        with self.lock:
-            if self.inode is None:
+    def get_child_attr(this, childname):
+        with this.lock:
+            if this.inode is None:
                 raise IOError(errno.EBADF, "Operation on a closed dir")
-            return self.inode.get_child_attr(childname)
+            return this.inode.get_child_attr(childname)
 
 
 class CachedFileInode(object):
@@ -655,12 +655,12 @@ class CachedFileInode(object):
     instance is per each logical file.
     """
 
-    def __init__(self, cachedb, upath, io, filecap, persistent=False):
-        self.upath = upath
-        self.closed = False
-        self.refcnt = 0
-        self.persistent = persistent
-        self.invalidated = False
+    def __init__(this, cachedb, upath, io, filecap, persistent=False):
+        this.upath = upath
+        this.closed = False
+        this.refcnt = 0
+        this.persistent = persistent
+        this.invalidated = False
 
         # Use per-file keys for different files, for safer fallback
         # in the extremely unlikely event of SHA512 hash collisions
@@ -668,16 +668,16 @@ class CachedFileInode(object):
         filename_state, key_state = cachedb.get_filename_and_key(upath, b'state')
         filename_data, key_data = cachedb.get_filename_and_key(upath, b'data')
 
-        self.lock = threading.RLock()
-        self.cache_lock = threading.RLock()
-        self.dirty = False
-        self.f = None
-        self.f_state = None
-        self.f_data = None
+        this.lock = threading.RLock()
+        this.cache_lock = threading.RLock()
+        this.dirty = False
+        this.f = None
+        this.f_state = None
+        this.f_data = None
 
-        self.stream_f = None
-        self.stream_offset = 0
-        self.stream_data = []
+        this.stream_f = None
+        this.stream_offset = 0
+        this.stream_data = []
 
         open_complete = False
 
@@ -687,103 +687,103 @@ class CachedFileInode(object):
                 raise ValueError()
 
             # Reuse cached metadata
-            self.f = CryptFile(filename, key=key, mode='r+b')
-            self.info = json_zlib_load(self.f)
+            this.f = CryptFile(filename, key=key, mode='r+b')
+            this.info = json_zlib_load(this.f)
 
             if persistent:
                 # Reuse cached data
-                self.f_state = CryptFile(filename_state, key=key_state, mode='r+b')
-                self.f_data = CryptFile(filename_data, key=key_data, mode='r+b')
-                self.block_cache = BlockCachedFile.restore_state(self.f_data, self.f_state)
+                this.f_state = CryptFile(filename_state, key=key_state, mode='r+b')
+                this.f_data = CryptFile(filename_data, key=key_data, mode='r+b')
+                this.block_cache = BlockCachedFile.restore_state(this.f_data, this.f_state)
                 open_complete = True
         except (IOError, OSError, ValueError):
             open_complete = False
-            if self.f is not None:
-                self.f.close()
-                self.f = None
-            if self.f_state is not None:
-                self.f_state.close()
-            if self.f_data is not None:
-                self.f_data.close()
+            if this.f is not None:
+                this.f.close()
+                this.f = None
+            if this.f_state is not None:
+                this.f_state.close()
+            if this.f_data is not None:
+                this.f_data.close()
 
         if not open_complete:
-            if self.f is None:
-                self.f = CryptFile(filename, key=key, mode='w+b')
+            if this.f is None:
+                this.f = CryptFile(filename, key=key, mode='w+b')
                 try:
                     if filecap is not None:
-                        self._load_info(filecap, io, iscap=True)
+                        this._load_info(filecap, io, iscap=True)
                     else:
-                        self.info = ['file', {'size': 0}]
-                        self.dirty = True
+                        this.info = ['file', {'size': 0}]
+                        this.dirty = True
                 except IOError as err:
                     os.unlink(filename)
-                    self.f.close()
+                    this.f.close()
                     raise
 
             # Create a data file
-            self.f_data = CryptFile(filename_data, key=key_data, mode='w+b')
+            this.f_data = CryptFile(filename_data, key=key_data, mode='w+b')
 
             # Block cache on top of data file
-            self.block_cache = BlockCachedFile(self.f_data, self.info[1]['size'])
+            this.block_cache = BlockCachedFile(this.f_data, this.info[1]['size'])
 
             # Block data state file
-            self.f_state = CryptFile(filename_state, key=key_state, mode='w+b')
+            this.f_state = CryptFile(filename_state, key=key_state, mode='w+b')
 
-        os.utime(self.f.path, None)
-        os.utime(self.f_data.path, None)
-        os.utime(self.f_state.path, None)
+        os.utime(this.f.path, None)
+        os.utime(this.f_data.path, None)
+        os.utime(this.f_state.path, None)
 
-    def _load_info(self, upath, io, iscap=False):
+    def _load_info(this, upath, io, iscap=False):
         try:
-            self.info = io.get_info(upath, iscap=iscap)
+            this.info = io.get_info(upath, iscap=iscap)
         except (HTTPError, IOError, ValueError) as err:
             if isinstance(err, HTTPError) and err.code == 404:
                 raise IOError(errno.ENOENT, "no such file")
             raise IOError(errno.EREMOTEIO, "failed to retrieve information")
-        self._save_info()
+        this._save_info()
 
-    def _save_info(self):
-        self.f.truncate(0)
-        self.f.seek(0)
-        if 'retrieved' not in self.info[1]:
-            self.info[1]['retrieved'] = time.time()
-        json_zlib_dump(self.info, self.f)
+    def _save_info(this):
+        this.f.truncate(0)
+        this.f.seek(0)
+        if 'retrieved' not in this.info[1]:
+            this.info[1]['retrieved'] = time.time()
+        json_zlib_dump(this.info, this.f)
 
-    def is_fresh(self, lifetime):
-        if 'retrieved' not in self.info[1]:
+    def is_fresh(this, lifetime):
+        if 'retrieved' not in this.info[1]:
             return True
-        return (self.info[1]['retrieved'] + lifetime >= time.time())
+        return (this.info[1]['retrieved'] + lifetime >= time.time())
 
-    def incref(self):
-        with self.cache_lock:
-            self.refcnt += 1
+    def incref(this):
+        with this.cache_lock:
+            this.refcnt += 1
 
-    def decref(self):
-        with self.cache_lock:
-            self.refcnt -= 1
-            if self.refcnt <= 0:
-                self.close()
+    def decref(this):
+        with this.cache_lock:
+            this.refcnt -= 1
+            if this.refcnt <= 0:
+                this.close()
 
-    def close(self):
-        with self.cache_lock, self.lock:
-            if not self.closed:
-                if self.stream_f is not None:
-                    self.stream_f.close()
-                    self.stream_f = None
-                    self.stream_data = []
-                self.f_state.seek(0)
-                self.f_state.truncate(0)
-                self.block_cache.save_state(self.f_state)
-                self.f_state.close()
-                self.block_cache.close()
-                self.f.close()
+    def close(this):
+        with this.cache_lock, this.lock:
+            if not this.closed:
+                if this.stream_f is not None:
+                    this.stream_f.close()
+                    this.stream_f = None
+                    this.stream_data = []
+                this.f_state.seek(0)
+                this.f_state.truncate(0)
+                this.block_cache.save_state(this.f_state)
+                this.f_state.close()
+                this.block_cache.close()
+                this.f.close()
 
-                if not self.persistent and self.upath is not None and not self.invalidated:
-                    os.unlink(self.f_state.path)
-                    os.unlink(self.f_data.path)
-            self.closed = True
+                if not this.persistent and this.upath is not None and not this.invalidated:
+                    os.unlink(this.f_state.path)
+                    os.unlink(this.f_data.path)
+            this.closed = True
 
-    def _do_rw(self, io, offset, length_or_data, write=False, no_result=False):
+    def _do_rw(this, io, offset, length_or_data, write=False, no_result=False):
         if write:
             data = length_or_data
             length = len(data)
@@ -791,136 +791,136 @@ class CachedFileInode(object):
             length = length_or_data
 
         while True:
-            with self.cache_lock:
+            with this.cache_lock:
                 if write:
-                    pos = self.block_cache.pre_write(offset, length)
+                    pos = this.block_cache.pre_write(offset, length)
                 else:
-                    pos = self.block_cache.pre_read(offset, length)
+                    pos = this.block_cache.pre_read(offset, length)
 
                 if pos is None:
                     # cache ready
                     if no_result:
                         return None
                     elif write:
-                        return self.block_cache.write(offset, data)
+                        return this.block_cache.write(offset, data)
                     else:
-                        return self.block_cache.read(offset, length)
+                        return this.block_cache.read(offset, length)
 
             # cache not ready -- fill it up
-            with self.lock:
+            with this.lock:
                 try:
                     c_offset, c_length = pos
 
-                    if self.stream_f is not None and (self.stream_offset > c_offset or
-                                                      c_offset >= self.stream_offset + 3*131072):
-                        self.stream_f.close()
-                        self.stream_f = None
-                        self.stream_data = []
+                    if this.stream_f is not None and (this.stream_offset > c_offset or
+                                                      c_offset >= this.stream_offset + 3*131072):
+                        this.stream_f.close()
+                        this.stream_f = None
+                        this.stream_data = []
 
-                    if self.stream_f is None:
-                        self.stream_f = io.get_content(self.info[1]['ro_uri'], c_offset, iscap=True)
-                        self.stream_offset = c_offset
-                        self.stream_data = []
+                    if this.stream_f is None:
+                        this.stream_f = io.get_content(this.info[1]['ro_uri'], c_offset, iscap=True)
+                        this.stream_offset = c_offset
+                        this.stream_data = []
 
-                    read_offset = self.stream_offset
-                    read_bytes = sum(len(x) for x in self.stream_data)
+                    read_offset = this.stream_offset
+                    read_bytes = sum(len(x) for x in this.stream_data)
                     while read_offset + read_bytes < c_offset + c_length:
-                        block = self.stream_f.read(131072)
+                        block = this.stream_f.read(131072)
 
                         if not block:
-                            self.stream_f.close()
-                            self.stream_f = None
-                            self.stream_data = []
+                            this.stream_f.close()
+                            this.stream_f = None
+                            this.stream_data = []
                             break
 
-                        self.stream_data.append(block)
+                        this.stream_data.append(block)
                         read_bytes += len(block)
 
-                        with self.cache_lock:
-                            self.stream_offset, self.stream_data = self.block_cache.receive_cached_data(
-                                self.stream_offset, self.stream_data)
+                        with this.cache_lock:
+                            this.stream_offset, this.stream_data = this.block_cache.receive_cached_data(
+                                this.stream_offset, this.stream_data)
                 except (HTTPError, IOError) as err:
-                    if self.stream_f is not None:
-                        self.stream_f.close()
-                    self.stream_f = None
+                    if this.stream_f is not None:
+                        this.stream_f.close()
+                    this.stream_f = None
                     raise IOError(errno.EREMOTEIO, "I/O error: %s" % (str(err),))
 
-    def get_size(self):
-        with self.cache_lock:
-            return self.block_cache.get_size()
+    def get_size(this):
+        with this.cache_lock:
+            return this.block_cache.get_size()
 
-    def get_attr(self):
-        return dict(type='file', size=self.get_size())
+    def get_attr(this):
+        return dict(type='file', size=this.get_size())
 
-    def read(self, io, offset, length):
-        return self._do_rw(io, offset, length, write=False)
+    def read(this, io, offset, length):
+        return this._do_rw(io, offset, length, write=False)
 
-    def write(self, io, offset, data):
+    def write(this, io, offset, data):
         """
         Write data to file. If *offset* is None, it means append.
         """
-        with self.lock:
+        with this.lock:
             if len(data) > 0:
-                self.dirty = True
+                this.dirty = True
                 if offset is None:
-                    offset = self.get_size()
-                self._do_rw(io, offset, data, write=True)
+                    offset = this.get_size()
+                this._do_rw(io, offset, data, write=True)
 
-    def truncate(self, size):
-        with self.cache_lock, self.lock:
-            if size != self.block_cache.get_size():
-                self.dirty = True
-            self.block_cache.truncate(size)
+    def truncate(this, size):
+        with this.cache_lock, this.lock:
+            if size != this.block_cache.get_size():
+                this.dirty = True
+            this.block_cache.truncate(size)
 
-    def _buffer_whole_file(self, io):
-        with self.cache_lock:
-            self._do_rw(io, 0, self.block_cache.get_size(), write=False, no_result=True)
+    def _buffer_whole_file(this, io):
+        with this.cache_lock:
+            this._do_rw(io, 0, this.block_cache.get_size(), write=False, no_result=True)
 
-    def upload(self, io, parent_cap=None):
-        with self.cache_lock, self.lock:
+    def upload(this, io, parent_cap=None):
+        with this.cache_lock, this.lock:
             # Buffer all data
-            self._buffer_whole_file(io)
+            this._buffer_whole_file(io)
 
             # Upload the whole file
             class Fwrapper(object):
-                def __init__(self, block_cache):
-                    self.block_cache = block_cache
-                    self.size = block_cache.get_size()
-                    self.f = self.block_cache.get_file()
-                    self.f.seek(0)
-                def __len__(self):
-                    return self.size
-                def read(self, size):
-                    return self.f.read(size)
+                def __init__(this, block_cache):
+                    this.block_cache = block_cache
+                    this.size = block_cache.get_size()
+                    this.f = this.block_cache.get_file()
+                    this.f.seek(0)
+                def __len__(this):
+                    return this.size
+                def read(this, size):
+                    return this.f.read(size)
 
             if parent_cap is None:
-                upath = self.upath
+                upath = this.upath
                 iscap = False
             else:
-                upath = parent_cap + "/" + ubasename(self.upath)
+                upath = parent_cap + "/" + ubasename(this.upath)
                 iscap = True
 
-            fw = Fwrapper(self.block_cache)
+            fw = Fwrapper(this.block_cache)
             try:
                 filecap = io.put_file(upath, fw, iscap=iscap)
             except (HTTPError, IOError) as err:
                 raise IOError(errno.EFAULT, "I/O error: %s" % (str(err),))
 
-            self.info[1]['ro_uri'] = filecap
-            self.info[1]['size'] = self.get_size()
-            self._save_info()
+            this.info[1]['ro_uri'] = filecap
+            this.info[1]['size'] = this.get_size()
+            this._save_info()
 
-            self.dirty = False
+            this.dirty = False
 
             return filecap
 
-    def unlink(self):
-        with self.cache_lock, self.lock:
-            if self.upath is not None and not self.invalidated:
-                os.unlink(self.f.path)
-                os.unlink(self.f_state.path)
-                os.unlink(self.f_data.path)
-            self.upath = None
+    def unlink(this):
+        with this.cache_lock, this.lock:
+            if this.upath is not None and not this.invalidated:
+                os.unlink(this.f.path)
+                os.unlink(this.f_state.path)
+                os.unlink(this.f_data.path)
+            this.upath = None
 
 
 class CachedDirInode(object):
@@ -929,67 +929,67 @@ class CachedDirInode(object):
     instance is per each logical directory.
     """
 
-    def __init__(self, cachedb, upath, io, dircap=None):
-        self.upath = upath
-        self.closed = False
-        self.refcnt = 0
-        self.lock = threading.RLock()
-        self.invalidated = False
+    def __init__(this, cachedb, upath, io, dircap=None):
+        this.upath = upath
+        this.closed = False
+        this.refcnt = 0
+        this.lock = threading.RLock()
+        this.invalidated = False
 
-        self.filename, self.key = cachedb.get_filename_and_key(upath)
+        this.filename, this.key = cachedb.get_filename_and_key(upath)
 
         try:
-            with CryptFile(self.filename, key=self.key, mode='rb') as f:
-                self.info = json_zlib_load(f)
-            os.utime(self.filename, None)
+            with CryptFile(this.filename, key=this.key, mode='rb') as f:
+                this.info = json_zlib_load(f)
+            os.utime(this.filename, None)
             return
         except (IOError, OSError, ValueError):
             pass
 
-        f = CryptFile(self.filename, key=self.key, mode='w+b')
+        f = CryptFile(this.filename, key=this.key, mode='w+b')
         try:
             if dircap is not None:
-                self.info = io.get_info(dircap, iscap=True)
+                this.info = io.get_info(dircap, iscap=True)
             else:
-                self.info = io.get_info(upath)
-            self.info[1]['retrieved'] = time.time()
-            json_zlib_dump(self.info, f)
+                this.info = io.get_info(upath)
+            this.info[1]['retrieved'] = time.time()
+            json_zlib_dump(this.info, f)
         except (HTTPError, IOError, ValueError):
-            os.unlink(self.filename)
+            os.unlink(this.filename)
             raise IOError(errno.EREMOTEIO, "failed to retrieve information")
         finally:
             f.close()
 
-    def _save_info(self):
-        with CryptFile(self.filename, key=self.key, mode='w+b') as f:
-            json_zlib_dump(self.info, f)
+    def _save_info(this):
+        with CryptFile(this.filename, key=this.key, mode='w+b') as f:
+            json_zlib_dump(this.info, f)
 
-    def is_fresh(self, lifetime):
-        return (self.info[1]['retrieved'] + lifetime >= time.time())
+    def is_fresh(this, lifetime):
+        return (this.info[1]['retrieved'] + lifetime >= time.time())
 
-    def incref(self):
-        with self.lock:
-            self.refcnt += 1
+    def incref(this):
+        with this.lock:
+            this.refcnt += 1
 
-    def decref(self):
-        with self.lock:
-            self.refcnt -= 1
-            if self.refcnt <= 0:
-                self.close()
+    def decref(this):
+        with this.lock:
+            this.refcnt -= 1
+            if this.refcnt <= 0:
+                this.close()
 
-    def close(self):
-        with self.lock:
-            self.closed = True
+    def close(this):
+        with this.lock:
+            this.closed = True
 
-    def listdir(self):
-        return list(self.info[1]['children'].keys())
+    def listdir(this):
+        return list(this.info[1]['children'].keys())
 
-    def get_attr(self):
+    def get_attr(this):
         return dict(type='dir')
 
-    def get_child_attr(self, childname):
+    def get_child_attr(this, childname):
         assert isinstance(childname, str)
-        children = self.info[1]['children']
+        children = this.info[1]['children']
         if childname not in children:
             raise IOError(errno.ENOENT, "no such entry")
 
@@ -1020,13 +1020,13 @@ class CachedDirInode(object):
         else:
             raise IOError(errno.ENOENT, "invalid entry")
 
-    def unlink(self):
-        if self.upath is not None and not self.invalidated:
-            os.unlink(self.filename)
-        self.upath = None
+    def unlink(this):
+        if this.upath is not None and not this.invalidated:
+            os.unlink(this.filename)
+        this.upath = None
 
-    def cache_add_child(self, basename, cap, size):
-        children = self.info[1]['children']
+    def cache_add_child(this, basename, cap, size):
+        children = this.info[1]['children']
 
         if basename in children:
             info = children[basename]
@@ -1044,25 +1044,25 @@ class CachedDirInode(object):
             info[1]['size'] = size
 
         children[basename] = info
-        self._save_info()
+        this._save_info()
 
-    def cache_remove_child(self, basename):
-        children = self.info[1]['children']
+    def cache_remove_child(this, basename):
+        children = this.info[1]['children']
         if basename in children:
             del children[basename]
-            self._save_info()
+            this._save_info()
 
 
 class RandomString(object):
-    def __init__(self, size):
-        self.size = size
+    def __init__(this, size):
+        this.size = size
 
-    def __len__(self):
-        return self.size
+    def __len__(this):
+        return this.size
 
-    def __getitem__(self, k):
+    def __getitem__(this, k):
         if isinstance(k, slice):
-            return os.urandom(len(range(*k.indices(self.size))))
+            return os.urandom(len(range(*k.indices(this.size))))
         else:
             raise IndexError("invalid index")
 
@@ -1082,30 +1082,30 @@ def json_zlib_load(fp):
 
 
 class ZlibDecompressor(object):
-    def __init__(self, fp):
-        self.fp = fp
-        self.decompressor = zlib.decompressobj()
-        self.buf = b""
-        self.eof = False
+    def __init__(this, fp):
+        this.fp = fp
+        this.decompressor = zlib.decompressobj()
+        this.buf = b""
+        this.eof = False
 
-    def read(self, sz=None):
+    def read(this, sz=None):
         if sz is not None and not (sz > 0):
             return b""
 
-        while not self.eof and (sz is None or sz > len(self.buf)):
-            block = self.fp.read(131072)
+        while not this.eof and (sz is None or sz > len(this.buf)):
+            block = this.fp.read(131072)
             if not block:
-                self.buf += self.decompressor.flush()
-                self.eof = True
+                this.buf += this.decompressor.flush()
+                this.eof = True
                 break
-            self.buf += self.decompressor.decompress(block)
+            this.buf += this.decompressor.decompress(block)
 
         if sz is None:
-            block = self.buf
-            self.buf = b""
+            block = this.buf
+            this.buf = b""
         else:
-            block = self.buf[:sz]
-            self.buf = self.buf[sz:]
+            block = this.buf[:sz]
+            this.buf = this.buf[sz:]
         return block
 
 
