@@ -64,7 +64,7 @@ class BlockStorage(object):
 		this.block_map = block_map
 		this.zero_block = b"\x00"*this.block_size
 		this._reconstruct_free_map()
-		return this.
+		return this
 
 	def _reconstruct_free_map(this):
 		if this.block_map:
@@ -210,7 +210,7 @@ class BlockCachedFile(object):
 		this.cache_size = cache_size
 		this.first_uncached_block = first_uncached_block
 		this.block_size = this.storage.block_size
-		return this.
+		return this
 
 	def _pad_file(this, new_size):
 		"""

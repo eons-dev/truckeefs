@@ -1,4 +1,4 @@
-"""tahoestaticfs [options] [mountpoint]
+"""truckeefs [options] [mountpoint]
 
 Tahoe-LAFS directory mounted as a filesystem, with local
 caching. Cached data is encrypted with a key derived from the
@@ -7,9 +7,9 @@ directory capability mounted.
 Dircap of the root directory is read from stdin on startup. In scripts, do::
 
 	awk '/^root:/ {print $2}' < ~/.tahoe/private/aliases \\
-		| tahoestaticfs ...
+		| truckeefs ...
 
-Cache can be invalidated by `touch <mountpoint>/.tahoestaticfs-invalidate`,
+Cache can be invalidated by `touch <mountpoint>/.truckeefs-invalidate`,
 or by removing files in the cache directory.
 
 """

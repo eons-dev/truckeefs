@@ -41,29 +41,3 @@ class StandardTestFixture(object):
 	def Destructor(this):
 		logging.debug(f"Destructing {this.__name__}")
 		shutil.rmtree(this.tempdir)
-
-
-	@classmethod # this is a lie.
-	def SetExecutorArgs(this):
-		# Spoof CLI args.
-		# this.executor.parsedArgs = eons.util.DotDict({
-		# 	'no_repo': True,
-		# 	'verbose': 3,
-		# 	'config': None
-		# })
-		# this.executor.extraArgs = {}
-
-
-	@classmethod # this is a lie.
-	def RegisterDirectories(this):
-
-		# Order matters
-		# Skip executor
-		register = [
-			# Not needed atm.
-		]
-		# for r in register:
-		# 	this.executor.RegisterAllClassesInDirectory(GetIncludePath(r))
-
-	# def GetExecutor(this):
-	# 	return this.executor

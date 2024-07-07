@@ -108,12 +108,12 @@ class TahoeStaticFS(fuse.Fuse):
 		if this.fuse_args.modifiers.get('foreground'):
 			# console logging only
 			handler = logging.StreamHandler()
-			fmt = logging.Formatter(fmt=("%(asctime)s tahoestaticfs[%(process)d]: " +
+			fmt = logging.Formatter(fmt=("%(asctime)s truckeefs[%(process)d]: " +
 										 this.fuse_args.mountpoint + " %(levelname)s: %(message)s"))
 		else:
 			# to syslog
 			handler = logging.handlers.SysLogHandler(address='/dev/log')
-			fmt = logging.Formatter(fmt=("tahoestaticfs[%(process)d]: " +
+			fmt = logging.Formatter(fmt=("truckeefs[%(process)d]: " +
 										 this.fuse_args.mountpoint + ": %(levelname)s: %(message)s"))
 
 		handler.setFormatter(fmt)
@@ -158,7 +158,7 @@ class TahoeStaticFS(fuse.Fuse):
 	def open(this, path, flags):
 		upath = this.cache.get_upath(path)
 		basename = os.path.basename(upath)
-		if basename == '.tahoestaticfs-invalidate' and (flags & os.O_CREAT):
+		if basename == '.truckeefs-invalidate' and (flags & os.O_CREAT):
 			this.cache.invalidate(os.path.dirname(upath))
 			return -errno.EACCES
 		return this.cache.open_file(upath, this.io, flags)

@@ -7,8 +7,8 @@ import array
 
 from StandardTestFixture import StandardTestFixture
 
-from tahoestaticfs.blockcache import BlockCachedFile, BlockStorage, block_range, ceildiv
-from tahoestaticfs.crypto import CryptFile
+from truckeefs.blockcache import BlockCachedFile, BlockStorage, block_range, ceildiv
+from truckeefs.crypto import CryptFile
 
 
 class TestBlockCachedFile(StandardTestFixture):

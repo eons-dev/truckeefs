@@ -5,7 +5,7 @@ import threading
 
 from StandardTestFixture import StandardTestFixture
 
-from tahoestaticfs.crypto import CryptFile
+from truckeefs.crypto import CryptFile
 
 class TestCryptFile(StandardTestFixture):
 

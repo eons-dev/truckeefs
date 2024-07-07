@@ -287,7 +287,7 @@ class CryptFile(object):
 			this._write(s, this.data_size)
 
 	def __enter__(this):
-		return this.
+		return this
 
 	def __exit__(this, exc_type, exc_value, traceback):
 		this.close()

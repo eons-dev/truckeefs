@@ -5,8 +5,8 @@ from io import StringIO
 
 from StandardTestFixture import StandardTestFixture
 
-from tahoestaticfs.cachedb import json_zlib_load, json_zlib_dump
-from tahoestaticfs.crypto import CryptFile
+from truckeefs.cachedb import json_zlib_load, json_zlib_dump
+from truckeefs.crypto import CryptFile
 
 
 class TestJsonZlib(StandardTestFixture):
