@@ -10,8 +10,8 @@ import logging.handlers
 
 import fuse
 
-from tahoestaticfs.cachedb import CacheDB
-from tahoestaticfs.tahoeio import TahoeConnection
+from .cachedb import CacheDB
+from .tahoeio import TahoeConnection
 
 print_lock = threading.Lock()
 

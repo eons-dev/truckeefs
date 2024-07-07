@@ -1,7 +1,9 @@
-=============
-tahoestaticfs
-=============
+# TruckeeFS
 
+TruckeeFS is a fork of Tahoestaticfs, a Fuse filesystem that enables read and write access to files stored on a [Tahoe-LAFS](http://tahoe-lafs.org/) grid.
+This fork was created to both improve the build process (at time of creation `pip install tahoestaticfs` fails on Ubuntu 22.04) and to make Tahoe more accessible within the Eons ecosystem.
+
+## TahoeStaticFS
 Tahoestaticfs is a Fuse filesystem that enables read and write access
 to files stored on a Tahoe-LAFS_ grid.
 
@@ -11,18 +13,15 @@ cached.
 
 Compared to mounting Tahoe-LAFS directories via sshfs (as of
 Tahoe-LAFS 1.9.2), Tahoestaticfs achieves better latency. This is true
-also for accessing data not in cache (e.g. ``ls -laR /mnt/tahoe`` with
+also for accessing data not in cache (e.g. `ls -laR /mnt/tahoe` with
 cold cache), due to the more aggressive directory metadata caching.
 Moreover, tahoestaticfs also supports random access reads to stored
 files, without requiring to download the full files.
 
-.. _Tahoe-LAFS: http://tahoe-lafs.org/
+Tahoe-LAFS: http://tahoe-lafs.org/
 
 
-Usage
------
-
-::
+### Usage
 
     tahoestaticfs [options] [mountpoint]
 
@@ -72,8 +71,7 @@ For example::
    from your Tahoe-LAFS aliases file as shown above.
 
 
-Caching and concurrency
------------------------
+## Caching and concurrency
 
 Cached data and metadata becomes invalidated if it is older than the
 corresponding cache lifetimes.  The cache lifetimes can be specified
@@ -101,8 +99,7 @@ of a subtree, do ``touch
 <mountpoint>/<somedir>/.tahoestaticfs-invalidate``.
 
 
-Encryption
-----------
+### Encryption
 
 Tahoestaticfs encrypts cached data and metadata retrieved from network
 before storing it on disk.

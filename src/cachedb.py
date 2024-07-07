@@ -16,9 +16,9 @@ from cryptography.hazmat.primitives import hashes, hmac
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-from tahoestaticfs.tahoeio import HTTPError
-from tahoestaticfs.crypto import CryptFile, backend
-from tahoestaticfs.blockcache import BlockCachedFile
+from .tahoeio import HTTPError
+from .crypto import CryptFile, backend
+from .blockcache import BlockCachedFile
 
 
 class CacheDB(object):

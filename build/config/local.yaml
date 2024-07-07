@@ -1,0 +1,43 @@
+name: truckeefs
+type: exe
+next:
+- build: py_package
+  build_in: pkg
+	copy:
+	- "/src/": "src/"
+	- "/inc/": "inc/"
+	- "/test/": "test/"
+	- "/README.md": "README.md"
+	- "/LICENSE": "LICENSE"
+	config:
+		clear_build_path: false
+		author_name: Eons
+		author_email: support@eons.llc
+		description: 
+		package_url: "https://github.com/eons-dev/truckeefs"
+		license: AGPLv3
+		python_min: '3.10'
+		requirements:
+		- fuse-python
+		skip_module_detection:
+		- fuse
+    - fcntl
+		classifiers:
+		- 'Development Status :: 4 - Beta'
+		next:
+		- build: py_install
+			build_in: "../"
+			config: 
+				next:
+				- build: py_test
+					build_in: "./"
+					config:
+						clear_build_path: false
+						test_path: "./test/unit/"
+            next:
+            - build: py_publish
+              run_when_any:
+              - release
+              build_in: "./"
+              config:
+                clear_build_path: false
