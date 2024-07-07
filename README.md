@@ -55,14 +55,14 @@ Tahoe-LAFS: http://tahoe-lafs.org/
                                Cache lifetime for read operations (seconds).
                                Default: 10 sec
 
-For example::
+For example:
 
     awk '/^root:/ {print $2}' < ~/.tahoe/private/aliases \\
         tahoestaticfs -c /var/cache/tahoefscache -D -S 5G -u http://127.0.0.1:8090 /mnt/tahoestatic
 
-.. warning::
+**warning:**
 
-   Do **not** do this::
+   Do **not** do this:
 
        echo URI:DIR2:... | tahoestaticfs
 
@@ -71,7 +71,7 @@ For example::
    from your Tahoe-LAFS aliases file as shown above.
 
 
-## Caching and concurrency
+### Caching and concurrency
 
 Cached data and metadata becomes invalidated if it is older than the
 corresponding cache lifetimes.  The cache lifetimes can be specified
@@ -118,7 +118,7 @@ combined with a randomly chosen 32-byte salt via PBKDF2. The iteration
 count is determined so that it takes around one second on the system
 in question, but is at least 10000. The salt is stored on-disk as-is.
 
-The AES encryption keys are file-specific, and obtained via::
+The AES encryption keys are file-specific, and obtained via:
 
     prk = HKDF-SHA256-Extract(salt2, master-key)
     data_key | fn_key = HKDF-SHA256-Expand(prk, pathname, 96)
