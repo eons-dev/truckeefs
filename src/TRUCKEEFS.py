@@ -1,25 +1,10 @@
-"""truckeefs [options] [mountpoint]
-
-Tahoe-LAFS directory mounted as a filesystem, with local
-caching. Cached data is encrypted with a key derived from the
-directory capability mounted.
-
-Dircap of the root directory is read from stdin on startup. In scripts, do::
-
-	awk '/^root:/ {print $2}' < ~/.tahoe/private/aliases \\
-		| truckeefs ...
-
-Cache can be invalidated by `touch <mountpoint>/.truckeefs-invalidate`,
-or by removing files in the cache directory.
-
-"""
 import eons
 import os
 import sys
 import fuse
 import logging
 
-from .staticfs import TahoeStaticFS
+from libtruckeefs import TruckeeFS
 
 fuse.fuse_python_api = (0, 2)
 
@@ -27,9 +12,19 @@ class TRUCKEEFS(eons.Executor):
 	def __init__(this):
 		super().__init__()
 
+		this.arg.kw.required.append("rootcap")
+		this.arg.kw.required.append("mount")
+		this.arg.kw.optional["node_url"] = "http://127.0.0.1:3456"
+
+		this.arg.mapping.append("rootcap")
+		this.arg.mapping.append("mount")
+		this.arg.mapping.append("node_url")
+
+
 	def Function(this):
-		usage = __doc__.strip()
-		usage += "".join(fuse.Fuse.fusage.splitlines(1)[2:])
-		fs = TahoeStaticFS(version="0.0.1", usage=usage, dash_s_do='undef')
-		fs.parse(errex=1)
-		fs.main()
+		fs = TruckeeFS()
+		fs(
+			rootcap = this.rootcap,
+			mount = this.mount,
+			node_url = this.node_url
+		)

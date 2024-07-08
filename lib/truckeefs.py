@@ -1,5 +1,6 @@
 import os
 import re
+import eons
 import sys
 import errno
 import stat
@@ -7,6 +8,7 @@ import traceback
 import threading
 import logging
 import logging.handlers
+from pathlib import Path
 
 import fuse
 
@@ -40,97 +42,89 @@ def ioerrwrap(func):
 	return wrapper
 
 
-class TahoeStaticFS(fuse.Fuse):
-	def __init__(this, *args, **kwargs):
-		super(TahoeStaticFS, this).__init__(*args, **kwargs)
-		this.parser.add_option('-c', '--cache', dest='cache', help="Cache directory")
-		this.parser.add_option('-u', '--node-url', dest='node_url', help="Tahoe gateway node URL")
-		this.parser.add_option('-D', '--cache-data', dest='cache_data', action="store_true", help="Cache also file data")
-		this.parser.add_option('-S', '--cache-size', dest='cache_size', help="Target cache size", default="1GB")
-		this.parser.add_option('-w', '--write-cache-lifetime', dest='write_lifetime', default='10',
-							   help="Cache lifetime for write operations (seconds). Default: 10 sec")
-		this.parser.add_option('-r', '--read-cache-lifetime', dest='read_lifetime', default='10',
-							   help="Cache lifetime for read operations (seconds). Default: 10 sec")
-		this.parser.add_option('-l', '--log-level', dest='log_level', default='warning',
-							   help="Log level (error, warning, info, debug). Default: warning")
-		this.parser.add_option('-t', '--timeout', dest='timeout', default='30',
-							   help="Network timeout. Default: 30s")
+class TruckeeFS(eons.Functor, fuse.Fuse):
+	def __init__(this, name="TruckeeFS"):
+		super(TruckeeFS, this).__init__(name)
 
-	def main(this, args=None):
-		if not this.fuse_args.mount_expected():
-			fuse.Fuse.main(this, args)
-			return
+		this.arg.kw.required.append("rootcap")
+		this.arg.kw.required.append("mount")
 
-		options = this.cmdline[0]
-		if options.cache is None:
-			print("error: --cache not specified")
-			sys.exit(1)
+		this.arg.kw.optional["node_url"] = "http://127.0.0.1:3456"
+		this.arg.kw.optional["cache_dir"] = Path(".tahoe-cache")
+		this.arg.kw.optional["cache_data"] = False
+		this.arg.kw.optional["cache_size"] = "1GB"
+		this.arg.kw.optional["write_lifetime"] = "10" #Cache lifetime for write operations (seconds).
+		this.arg.kw.optional["read_lifetime"] = "10" #Cache lifetime for read operations (seconds).
+		this.arg.kw.optional["timeout"] = "30" #Network timeout (seconds).
+		
+		# Supported FUSE args
+		this.arg.kw.optional["fuse_default_permissions"] = False
+		this.arg.kw.optional["fuse_allow_other"] = False
+		this.arg.kw.optional["fuse_uid"] = 0
+		this.arg.kw.optional["fuse_gid"] = 0
+		this.arg.kw.optional["fuse_fmask"] = 0o764
+		this.arg.kw.optional["fuse_dmask"] = 0o755
 
-		if options.node_url is None:
-			print("error: --node-url not specified")
-			sys.exit(1)
+	def ValidateArgs(this):
+		super().ValidateArgs()
 
 		try:
-			log_level = parse_log_level(options.log_level)
+			this.cache_size = parse_size(this.cache_size)
 		except ValueError:
-			print(("error: --log-level %r is not a valid log level" % (options.log_level,)))
-			sys.exit(1)
-
-		node_url = options.node_url
-
+			raise eons.MissingArgumentError(f"error: --cache-size {this.cache_size} is not a valid size specifier")
+	
 		try:
-			cache_size = parse_size(options.cache_size)
+			this.read_lifetime = parse_lifetime(this.read_lifetime)
 		except ValueError:
-			print(("error: --cache-size %r is not a valid size specifier" % (options.cache_size,)))
-			sys.exit(1)
+			raise eons.MissingArgumentError(f"error: --read-cache-lifetime {this.read_lifetime} is not a valid lifetime")
 
 		try:
-			read_lifetime = parse_lifetime(options.read_lifetime)
+			this.write_lifetime = parse_lifetime(this.write_lifetime)
 		except ValueError:
-			print(("error: --read-cache-lifetime %r is not a valid lifetime" % (options.read_lifetime,)))
-			sys.exit(1)
+			raise eons.MissingArgumentError(f"error: --write-cache-lifetime {this.write_lifetime} is not a valid lifetime")
 
 		try:
-			write_lifetime = parse_lifetime(options.write_lifetime)
-		except ValueError:
-			print(("error: --write-cache-lifetime %r is not a valid lifetime" % (options.write_lifetime,)))
-			sys.exit(1)
-
-		try:
-			timeout = float(options.timeout)
-			if not 0 < timeout < float('inf'):
+			this.timeout = float(this.timeout)
+			if not 0 < this.timeout < float('inf'):
 				raise ValueError()
 		except ValueError:
-			print(("error: --timeout %r is not a valid timeout" % (options.timeout,)))
-			sys.exit(1)
+			raise eons.MissingArgumentError(f"error: --timeout {this.timeout} is not a valid timeout")
 
-		logger = logging.getLogger('')
-		if this.fuse_args.modifiers.get('foreground'):
-			# console logging only
-			handler = logging.StreamHandler()
-			fmt = logging.Formatter(fmt=("%(asctime)s truckeefs[%(process)d]: " +
-										 this.fuse_args.mountpoint + " %(levelname)s: %(message)s"))
-		else:
-			# to syslog
-			handler = logging.handlers.SysLogHandler(address='/dev/log')
-			fmt = logging.Formatter(fmt=("truckeefs[%(process)d]: " +
-										 this.fuse_args.mountpoint + ": %(levelname)s: %(message)s"))
+		this.rootcap = this.rootcap.strip()
 
-		handler.setFormatter(fmt)
-		logger.addHandler(handler)
-		logger.setLevel(log_level)
+		Path(this.cache_dir).mkdir(parents=True, exist_ok=True)
 
-		rootcap = input('Root dircap: ').strip()
 
-		if not os.path.isdir(options.cache):
-			os.makedirs(options.cache)
+	def Function(this):
 
-		this.cache = CacheDB(options.cache, rootcap, node_url,
-							 cache_size=cache_size, 
-							 cache_data=options.cache_data,
-							 read_lifetime=read_lifetime,
-							 write_lifetime=write_lifetime)
-		this.io = TahoeConnection(node_url, rootcap, timeout)
+		this.cache = CacheDB(
+			this.cache_dir, 
+			thir.rootcap,
+			this.node_url,
+			cache_size=this.cache_size, 
+			cache_data=this.cache_data,
+			read_lifetime=this.read_lifetime,
+			write_lifetime=this.write_lifetime
+		)
+
+		this.io = TahoeConnection(
+			this.node_url,
+			this.rootcap,
+			this.timeout
+		)
+
+		fuseargs = {
+			'fsname': 'truckeefs',
+			'nothreads': True,
+			'foreground': True,
+			'direct_io': True,
+			'allow_other': this.fuse_allow_other,
+			'default_permissions': this.fuse_default_permissions,
+			'uid': this.fuse_uid,
+			'gid': this.fuse_gid,
+			'fmask': this.fuse_fmask,
+			'dmask': this.fuse_dmask,
+		}
 
 		fuse.Fuse.main(this, args)
 

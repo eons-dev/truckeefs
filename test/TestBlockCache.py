@@ -7,8 +7,8 @@ import array
 
 from StandardTestFixture import StandardTestFixture
 
-from truckeefs.blockcache import BlockCachedFile, BlockStorage, block_range, ceildiv
-from truckeefs.crypto import CryptFile
+from libtruckeefs import BlockCachedFile, BlockStorage, block_range, ceildiv
+from libtruckeefs import CryptFile
 
 
 class TestBlockCachedFile(StandardTestFixture):
@@ -215,7 +215,16 @@ class TestBlockCachedFile(StandardTestFixture):
 		this.assert_equal(f2.read(), this.cache_data[17+3*12+7:])
 
 
-class TestBlockStorage(object):
+class TestBlockStorage(StandardTestFixture):
+
+	@classmethod
+	def Constructor(this):
+		pass
+
+	@classmethod
+	def Destructor(this):
+		pass
+
 	def test_basic(this):
 		tmpf = tempfile.TemporaryFile()
 		statef = tempfile.TemporaryFile()
@@ -256,7 +265,16 @@ class TestBlockStorage(object):
 		this.assert_equal(f[2], block_2)
 
 
-class TestBlockRange(object):
+class TestBlockRange(StandardTestFixture):
+	
+	@classmethod
+	def Constructor(this):
+		pass
+
+	@classmethod
+	def Destructor(this):
+		pass
+
 	def _check_block_slice(this, data, offset, length, block_size, last_pos=None):
 		"""
 		Check block_range invariant

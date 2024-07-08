@@ -1,6 +1,8 @@
 import logging
 import pytest
 import tempfile
+import shutil
+import os
 from Includes import Include, GetIncludePath
 
 class StandardTestFixture(object):
@@ -34,7 +36,7 @@ class StandardTestFixture(object):
 	def Constructor(this):
 		logging.debug(f"Constructing {this.__name__}")
 		this.tempdir = tempfile.mkdtemp()
-		this.file_name = os.path.join(this.tmpdir, 'test.dat')		
+		this.file_name = os.path.join(this.tempdir, 'test.dat')		
 
 	
 	@classmethod # this is a lie.

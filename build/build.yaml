@@ -5,6 +5,8 @@ build_in: tmp
 next:
 - run_when_none:
 	- github
+	copy:
+	- "/build/config": "local/config/"
 	build: proxy
 	build_in: local
 	config:
@@ -12,6 +14,8 @@ next:
 		proxy: "../config/local.yaml"
 - run_when_any:
 	- github
+	copy:
+	- "/build/config": "github/local/config/"
 	build: proxy
 	build_in: github
 	config:
