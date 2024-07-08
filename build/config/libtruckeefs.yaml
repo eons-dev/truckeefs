@@ -14,7 +14,7 @@ next:
 		author_email: support@eons.llc
 		description: 
 		package_url: "https://github.com/eons-dev/truckeefs"
-		license: AGPLv3
+		license: "GNU Affero General Public License v3 or later (AGPLv3+)"
 		python_min: '3.10'
 		skip_module_detection:
     - fcntl
