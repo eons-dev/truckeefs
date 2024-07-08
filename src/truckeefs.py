@@ -54,6 +54,7 @@ class TruckeeFS(eons.Functor, fuse.Fuse):
 		this.arg.kw.optional["write_lifetime"] = "10" #Cache lifetime for write operations (seconds).
 		this.arg.kw.optional["read_lifetime"] = "10" #Cache lifetime for read operations (seconds).
 		this.arg.kw.optional["timeout"] = "30" #Network timeout (seconds).
+		this.arg.kw.optional["daemon"] = False
 		
 		# Supported FUSE args
 		this.arg.kw.optional["multithreaded"] = True
@@ -112,20 +113,11 @@ class TruckeeFS(eons.Functor, fuse.Fuse):
 			this.timeout
 		)
 
-		this.fuse_args = eons.util.DotDict({
-			'fsname': 'truckeefs',
-			'foreground': True,
-			'direct_io': True,
-			'allow_other': this.fuse_allow_other,
-			'default_permissions': this.fuse_default_permissions,
-			'uid': this.fuse_uid,
-			'gid': this.fuse_gid,
-			'fmask': this.fuse_fmask,
-			'dmask': this.fuse_dmask,
-		})
-
 		this.fuse_args = fuse.FuseArgs()
 		this.fuse_args.mountpoint = this.mount
+
+		if (not this.daemon):
+			this.fuse_args.setmod('foreground')
 		
 		# TODO: FUSE is bugged:
 		#   File "/usr/local/lib/python3.10/dist-packages/fuseparts/subbedopts.py", line 50, in canonify
