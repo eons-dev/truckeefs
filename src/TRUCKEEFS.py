@@ -4,7 +4,7 @@ import sys
 import fuse
 import logging
 
-from libtruckeefs import TruckeeFS
+from .truckeefs import TruckeeFS
 
 fuse.fuse_python_api = (0, 2)
 

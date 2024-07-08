@@ -56,6 +56,7 @@ class TruckeeFS(eons.Functor, fuse.Fuse):
 		this.arg.kw.optional["timeout"] = "30" #Network timeout (seconds).
 		
 		# Supported FUSE args
+		this.arg.kw.optional["mulitthreaded"] = True
 		this.arg.kw.optional["fuse_default_permissions"] = False
 		this.arg.kw.optional["fuse_allow_other"] = False
 		this.arg.kw.optional["fuse_uid"] = 0
@@ -97,7 +98,7 @@ class TruckeeFS(eons.Functor, fuse.Fuse):
 
 		this.cache = CacheDB(
 			this.cache_dir, 
-			thir.rootcap,
+			this.rootcap,
 			this.node_url,
 			cache_size=this.cache_size, 
 			cache_data=this.cache_data,
@@ -111,9 +112,8 @@ class TruckeeFS(eons.Functor, fuse.Fuse):
 			this.timeout
 		)
 
-		fuseargs = {
+		this.fuse_args = eons.util.DotDict({
 			'fsname': 'truckeefs',
-			'nothreads': True,
 			'foreground': True,
 			'direct_io': True,
 			'allow_other': this.fuse_allow_other,
@@ -122,9 +122,29 @@ class TruckeeFS(eons.Functor, fuse.Fuse):
 			'gid': this.fuse_gid,
 			'fmask': this.fuse_fmask,
 			'dmask': this.fuse_dmask,
-		}
+		})
 
-		fuse.Fuse.main(this, args)
+		this.fuse_args = fuse.FuseArgs()
+		this.fuse_args.mountpoint = this.mount
+		
+		# TODO: FUSE is bugged:
+		#   File "/usr/local/lib/python3.10/dist-packages/fuseparts/subbedopts.py", line 50, in canonify
+		#    for k, v in self.optdict.items():
+		#	RuntimeError: dictionary changed size during iteration
+		#
+		# this.fuse_args.optdict = {
+		# 	'fsname': 'truckeefs',
+		# 	'foreground': True,
+		# 	'direct_io': True,
+		# 	'allow_other': this.fuse_allow_other,
+		# 	'default_permissions': this.fuse_default_permissions,
+		# 	'uid': this.fuse_uid,
+		# 	'gid': this.fuse_gid,
+		# 	'fmask': this.fuse_fmask,
+		# 	'dmask': this.fuse_dmask,
+		# }
+		
+		fuse.Fuse.main(this)
 
 	# -- Directory handle ops
 
