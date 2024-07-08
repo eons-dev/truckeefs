@@ -56,7 +56,7 @@ class TruckeeFS(eons.Functor, fuse.Fuse):
 		this.arg.kw.optional["timeout"] = "30" #Network timeout (seconds).
 		
 		# Supported FUSE args
-		this.arg.kw.optional["mulitthreaded"] = True
+		this.arg.kw.optional["multithreaded"] = True
 		this.arg.kw.optional["fuse_default_permissions"] = False
 		this.arg.kw.optional["fuse_allow_other"] = False
 		this.arg.kw.optional["fuse_uid"] = 0
