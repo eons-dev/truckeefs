@@ -7,13 +7,11 @@ import stat
 import traceback
 import threading
 import logging
-import logging.handlers
 from pathlib import Path
 
 import fuse
 
-from .cachedb import CacheDB
-from .tahoeio import TahoeConnection
+from libtruckeefs import CacheDB, TahoeConnection
 
 print_lock = threading.Lock()
 
@@ -279,6 +277,9 @@ def parse_size(size_str):
 
 
 def parse_lifetime(lifetime_str):
+	if (type(lifetime_str) == int):
+		return lifetime_str
+
 	if lifetime_str.lower() in ('inf', 'infinity', 'infinite'):
 		return 100*365*24*60*60
 
@@ -286,13 +287,3 @@ def parse_lifetime(lifetime_str):
 		return int(lifetime_str)
 	except ValueError:
 		raise ValueError("invalid lifetime specifier")
-
-
-def parse_log_level(log_level):
-	try:
-		return {'error': logging.ERROR,
-				'warning': logging.WARNING,
-				'info': logging.INFO,
-				'debug': logging.DEBUG}[log_level]
-	except KeyError:
-		raise ValueError("invalid log level specifier")

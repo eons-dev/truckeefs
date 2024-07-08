@@ -16,10 +16,7 @@ next:
 		package_url: "https://github.com/eons-dev/truckeefs"
 		license: AGPLv3
 		python_min: '3.10'
-		requirements:
-		- fuse-python
 		skip_module_detection:
-		- fuse
     - fcntl
 		classifiers:
 		- 'Development Status :: 4 - Beta'

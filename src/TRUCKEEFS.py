@@ -9,8 +9,8 @@ from libtruckeefs import TruckeeFS
 fuse.fuse_python_api = (0, 2)
 
 class TRUCKEEFS(eons.Executor):
-	def __init__(this):
-		super().__init__()
+	def __init__(this, name="TruckeeFS"):
+		super().__init__(name)
 
 		this.arg.kw.required.append("rootcap")
 		this.arg.kw.required.append("mount")
