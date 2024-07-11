@@ -11,7 +11,7 @@ from pathlib import Path
 
 import fuse
 
-from libtruckeefs import CacheDB, TahoeConnection
+from libtruckeefs import RiverFS, TahoeConnection
 
 print_lock = threading.Lock()
 
@@ -40,20 +40,12 @@ def ioerrwrap(func):
 	return wrapper
 
 
-class TruckeeFS(eons.Functor, fuse.Fuse):
+class TruckeeFS(RiverFS, fuse.Fuse):
 	def __init__(this, name="TruckeeFS"):
 		super(TruckeeFS, this).__init__(name)
 
-		this.arg.kw.required.append("rootcap")
 		this.arg.kw.required.append("mount")
 
-		this.arg.kw.optional["node_url"] = "http://127.0.0.1:3456"
-		this.arg.kw.optional["cache_dir"] = Path(".tahoe-cache")
-		this.arg.kw.optional["cache_data"] = False
-		this.arg.kw.optional["cache_size"] = "1GB"
-		this.arg.kw.optional["write_lifetime"] = "10" #Cache lifetime for write operations (seconds).
-		this.arg.kw.optional["read_lifetime"] = "10" #Cache lifetime for read operations (seconds).
-		this.arg.kw.optional["timeout"] = "30" #Network timeout (seconds).
 		this.arg.kw.optional["daemon"] = False
 		
 		# Supported FUSE args
@@ -64,35 +56,6 @@ class TruckeeFS(eons.Functor, fuse.Fuse):
 		this.arg.kw.optional["fuse_gid"] = 0
 		this.arg.kw.optional["fuse_fmask"] = 0o764
 		this.arg.kw.optional["fuse_dmask"] = 0o755
-
-	def ValidateArgs(this):
-		super().ValidateArgs()
-
-		try:
-			this.cache_size = parse_size(this.cache_size)
-		except ValueError:
-			raise eons.MissingArgumentError(f"error: --cache-size {this.cache_size} is not a valid size specifier")
-	
-		try:
-			this.read_lifetime = parse_lifetime(this.read_lifetime)
-		except ValueError:
-			raise eons.MissingArgumentError(f"error: --read-cache-lifetime {this.read_lifetime} is not a valid lifetime")
-
-		try:
-			this.write_lifetime = parse_lifetime(this.write_lifetime)
-		except ValueError:
-			raise eons.MissingArgumentError(f"error: --write-cache-lifetime {this.write_lifetime} is not a valid lifetime")
-
-		try:
-			this.timeout = float(this.timeout)
-			if not 0 < this.timeout < float('inf'):
-				raise ValueError()
-		except ValueError:
-			raise eons.MissingArgumentError(f"error: --timeout {this.timeout} is not a valid timeout")
-
-		this.rootcap = this.rootcap.strip()
-
-		Path(this.cache_dir).mkdir(parents=True, exist_ok=True)
 
 
 	def Function(this):
