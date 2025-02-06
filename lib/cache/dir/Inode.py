@@ -11,7 +11,7 @@ class CachedDirInode(object):
 		this.lock = threading.RLock()
 		this.invalidated = False
 
-		this.filename, this.key = cachedb.get_filename_and_key(upath)
+		this.filename, this.key = cachedb.GetFileNameAndKey(upath)
 
 		try:
 			with CryptFile(this.filename, key=this.key, mode='rb') as f:

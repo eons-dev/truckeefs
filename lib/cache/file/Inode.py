@@ -13,9 +13,9 @@ class CachedFileInode(object):
 
 		# Use per-file keys for different files, for safer fallback
 		# in the extremely unlikely event of SHA512 hash collisions
-		filename, key = cachedb.get_filename_and_key(upath)
-		filename_state, key_state = cachedb.get_filename_and_key(upath, b'state')
-		filename_data, key_data = cachedb.get_filename_and_key(upath, b'data')
+		filename, key = cachedb.GetFileNameAndKey(upath)
+		filename_state, key_state = cachedb.GetFileNameAndKey(upath, b'state')
+		filename_data, key_data = cachedb.GetFileNameAndKey(upath, b'data')
 
 		this.lock = threading.RLock()
 		this.cache_lock = threading.RLock()

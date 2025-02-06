@@ -1,4 +1,10 @@
+import time
 
+# Sleep for exponentially increasing time. `n` is the number of times
+# sleep has been called.
+def ExponentialSleep(n, start=0.1, max_sleep=60):
+	sleep_time = min(start * (2**n), max_sleep)
+	time.sleep(sleep_time)
 
 class RandomString(object):
 	def __init__(this, size):
