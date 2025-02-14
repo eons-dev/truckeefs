@@ -36,17 +36,48 @@ class Directory (Inode):
 		pass
 
 	def PushUpstream(this):
-		pass
+		source_conn = this.executor.GetSourceConnection()
+		# For directories, assume we “upload” a JSON representation of the directory info.
+		import json
+		dir_metadata = json.dumps(this.info)
+		# Determine the upload path for the directory.
+		parent_cap = this.executor.LookupCap(udirname(this.upath), source_conn)
+		upload_path = parent_cap + "/" + ubasename(this.upath)
+		try:
+			# Use put_file to upload the metadata.
+			new_cap = source_conn.put_file(upload_path, data=dir_metadata.encode('utf-8'), iscap=True)
+		except Exception as e:
+			raise IOError(errno.EREMOTEIO, f"Error uploading directory metadata: {str(e)}")
+		# Save the new capability.
+		this.info[1]['ro_uri'] = new_cap
 
 	def AfterPushUpstream(this):
-		pass
+		# Mark directory as synced.
+    	this.dirty = False
 
 	
 	def BeforePullDownstream(this):
 		pass
 	
 	def PullDownstream(this):
-		pass
+		source_conn = this.executor.GetSourceConnection()
+		ro_uri = this.info[1].get('ro_uri')
+		if not ro_uri:
+			raise IOError(errno.ENOENT, "No remote URI available for directory")
+		
+		try:
+			# Get the JSON metadata for the directory.
+			remote_stream = source_conn.get_content(ro_uri)
+			import json
+			new_info = json.load(remote_stream)
+		except Exception as e:
+			raise IOError(errno.EREMOTEIO, f"Error downloading directory metadata: {str(e)}")
+		finally:
+			remote_stream.close()
+		
+		# Update local metadata.
+		this.info = new_info
 	
 	def AfterPullDownstream(this):
-		pass
+		# Update retrieval time.
+    	this.info[1]['retrieved'] = time.time()
