@@ -1,3 +1,24 @@
+"""
+lib/fs/File.py
+
+Purpose:
+Implements a File inode (subclass of Inode) specialized for files.
+
+Place in Architecture:
+Represents files in the local cache. It holds a reference to the local data (path to the cached file) and coordinates file-level syncing.
+
+Interface:
+
+	__init__(upath, name="File"): Initializes a File inode.
+	GetDataToSave(): Returns file-specific metadata (e.g. the data file path).
+	LoadFromData(data): Loads file metadata.
+	Stub methods for: Freeze(), BeforePushUpstream(), PushUpstream(), AfterPushUpstream(), BeforePullDownstream(), PullDownstream(), and AfterPullDownstream().
+
+TODOs/FIXMEs:
+
+	TODO: Implement the file synchronization methods. The comment in Freeze() indicates the need to wait for writes to finish before freezing.
+"""
+
 import eons
 from .Inode import *
 
@@ -29,75 +50,101 @@ class File (Inode):
 		super().LoadFromData(data)
 		this.data = data['data']
 
-	def Freeze(this):
-		# Copy the file data to a temporary file.
-		# Wait for any writes to finish first.
-	
-
-	def BeforePushUpstream(this):
-		# Ensure all pending writes are flushed.
-		# (If using block cache, flush it to disk.)
-		this.Flush()  # Assume this flushes the FileOnDisk object.
-
-	def PushUpstream(this):
-		# Use the TahoeConnection (obtained from executor) to upload the file.
-		# We'll assume that 'this.executor.GetSourceConnection()' returns a TahoeConnection.
-		source_conn = this.executor.GetSourceConnection()
-		
-		# Get the local file path that holds our file data.
-		local_path = this.data  # Assuming `data` holds the path to our FileOnDisk cache file.
-		
-		# Open the file for reading.
-		with open(local_path, 'rb') as f:
-			# The Tahoe API expects to receive a file-like object.
-			try:
-				# Construct an upload path based on the file's upath.
-				# For example, use the parent directory's capability.
-				parent_cap = this.executor.LookupCap(udirname(this.upath), source_conn)
-				upload_path = parent_cap + "/" + ubasename(this.upath)
-				
-				# Upload file.
-				filecap = source_conn.put_file(upload_path, f, iscap=True)
-			
-			except Exception as e:
-				raise IOError(errno.EFAULT, f"Error uploading file: {str(e)}")
-		
-		# Save the returned capability for future use.
-		this.info[1]['ro_uri'] = filecap
-		this.info[1]['size'] = this.GetSize()  # Assuming GetSize returns the file size.
-		
-
-	def AfterPushUpstream(this):
-		# Mark the file as clean.
-    	this.dirty = False
-
-
-	def BeforePullDownstream(this):
-		pass
-	
-	def PullDownstream(this):
-		source_conn = this.executor.GetSourceConnection()
-		ro_uri = this.info[1].get('ro_uri')
-		if not ro_uri:
-			raise IOError(errno.ENOENT, "No remote URI available for download")
-		
-		# Open a stream from Tahoe:
+	def Freeze(self):
+		"""Capture a snapshot of the file's state for syncing."""
 		try:
-			# Assume get_content returns a file-like object for the remote file.
+			# Flush any pending writes to disk.
+			self.Flush()  # (Assuming Flush() is implemented to call FileOnDisk.flush())
+			freeze_info = {
+				'local_path': self.data,
+				'size': self.GetSize(),  # Your method to get file size
+				'timestamp': time.time(),
+				'metadata': self.info
+			}
+			logging.info(f"Freeze: File {self.upath} frozen with info {freeze_info}")
+			return freeze_info
+		except Exception as e:
+			logging.error(f"Freeze error for file {self.upath}: {str(e)}")
+			raise IOError(errno.EFAULT, f"Error freezing file {self.upath}")
+
+	def BeforePushUpstream(self):
+		"""Prepare file for upload by flushing and checking consistency."""
+		try:
+			self.Flush()
+			logging.info(f"BeforePushUpstream: File {self.upath} flushed successfully.")
+		except Exception as e:
+			logging.error(f"BeforePushUpstream error for file {self.upath}: {str(e)}")
+			raise IOError(errno.EFAULT, f"BeforePushUpstream error for file {self.upath}")
+
+	def PushUpstream(self):
+		"""Upload the file's data to Tahoe and return the remote capability."""
+		source_conn = self.executor.GetSourceConnection()
+		local_path = self.data  # Local cached file
+		try:
+			parent_cap = self.executor.LookupCap(udirname(self.upath), source_conn)
+			upload_path = parent_cap + "/" + ubasename(self.upath)
+			with open(local_path, 'rb') as f:
+				filecap = source_conn.put_file(upload_path, f, iscap=True)
+			logging.info(f"PushUpstream: File {self.upath} uploaded to {upload_path} with filecap {filecap}")
+			return filecap
+		except Exception as e:
+			logging.error(f"PushUpstream error for file {self.upath} (local path {local_path}): {str(e)}")
+			raise IOError(errno.EFAULT, f"Error uploading file {self.upath}")
+
+	def AfterPushUpstream(self):
+		"""Update local metadata after a successful upload."""
+		try:
+			filecap = self.PushUpstream()  # In some flows, PushUpstream may have already been run.
+			self.info[1]['ro_uri'] = filecap
+			self.info[1]['size'] = self.GetSize()
+			self.dirty = False
+			logging.info(f"AfterPushUpstream: File {self.upath} metadata updated; file is now clean.")
+		except Exception as e:
+			logging.error(f"AfterPushUpstream error for file {self.upath}: {str(e)}")
+			raise IOError(errno.EFAULT, f"AfterPushUpstream error for file {self.upath}")
+
+	def BeforePullDownstream(self):
+		"""Determine if the local cache is stale and a download is needed."""
+		ttl = self.executor.cache_ttl  # Cache time-to-live in seconds.
+		retrieved = self.info[1].get('retrieved', 0)
+		age = time.time() - retrieved
+		if age < ttl:
+			logging.info(f"BeforePullDownstream: File {self.upath} cache is fresh (age {age:.2f}s); no download needed.")
+			return False
+		logging.info(f"BeforePullDownstream: File {self.upath} cache is stale (age {age:.2f}s); proceeding to download.")
+		return True
+
+	def PullDownstream(self):
+		"""Download the file from Tahoe and update the local cache."""
+		source_conn = self.executor.GetSourceConnection()
+		ro_uri = self.info[1].get('ro_uri')
+		if not ro_uri:
+			logging.error(f"PullDownstream: No remote URI for file {self.upath}")
+			raise IOError(errno.ENOENT, "No remote URI available for file")
+		try:
 			remote_stream = source_conn.get_content(ro_uri)
 		except Exception as e:
-			raise IOError(errno.EREMOTEIO, f"Error downloading file: {str(e)}")
-		
-		# Overwrite the local file with the downloaded data.
-		# (You might open the local cache file in write mode and copy data.)
-		with open(this.data, 'wb') as local_f:
-			while True:
-				chunk = remote_stream.read(131072)  # Read in block-size chunks.
-				if not chunk:
-					break
-				local_f.write(chunk)
-		remote_stream.close()
-	
-	def AfterPullDownstream(this):
-		# Update metadata (e.g., refresh timestamps, mark as fresh)
-    	this.info[1]['retrieved'] = time.time()
+			logging.error(f"PullDownstream: Failed to open remote stream for file {self.upath}: {str(e)}")
+			raise IOError(errno.EREMOTEIO, f"Error downloading file {self.upath}")
+		local_path = self.data
+		try:
+			with open(local_path, 'wb') as local_f:
+				while True:
+					chunk = remote_stream.read(131072)
+					if not chunk:
+						break
+					local_f.write(chunk)
+			remote_stream.close()
+			logging.info(f"PullDownstream: File {self.upath} downloaded and local cache updated.")
+		except Exception as e:
+			logging.error(f"PullDownstream error for file {self.upath}: {str(e)}")
+			raise IOError(errno.EREMOTEIO, f"Error writing file {self.upath} from remote stream")
+
+	def AfterPullDownstream(self):
+		"""Update metadata after download to mark the file as fresh."""
+		try:
+			self.info[1]['retrieved'] = time.time()
+			logging.info(f"AfterPullDownstream: File {self.upath} metadata updated with new retrieval time.")
+		except Exception as e:
+			logging.error(f"AfterPullDownstream error for file {self.upath}: {str(e)}")
+			raise IOError(errno.EFAULT, f"AfterPullDownstream error for file {self.upath}")

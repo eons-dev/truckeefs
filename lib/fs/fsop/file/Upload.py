@@ -1,3 +1,19 @@
+"""
+lib/fs/fsop/file/Upload.py
+
+Purpose:
+Handles file upload operations from the local cache to the Tahoe backend.
+
+Place in Architecture:
+Called when a file (that has been modified) needs to be synchronized upstream. Integrates with the inode’s upload() method and updates the parent directory’s cache.
+
+Interface:
+
+	A function (decorated with @eons.kind(FSOp)) that takes a file handle (or its inode) and an I/O object, performs the upload, and updates metadata.
+
+TODOs/FIXMEs:
+None explicitly noted.
+"""
 
 @eons.kind(FSOp)
 def file_upload(this, c, io):

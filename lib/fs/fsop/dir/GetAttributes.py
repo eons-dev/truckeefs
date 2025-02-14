@@ -1,3 +1,19 @@
+"""
+lib/fs/fsop/dir/GetAttributes.py
+
+Purpose:
+Retrieves attributes for a directory (for FUSE getattr calls).
+
+Place in Architecture:
+Maps a directory's cached metadata (and its children) to a dictionary of attributes.
+
+Interface:
+
+	A function (decorated with @eons.kind(FSOp)) that takes a directory upath and an I/O object and returns its attributes.
+
+TODOs/FIXMEs:
+None explicitly noted.
+"""
 
 @eons.kind(FSOpGetAttr)
 def directory_getattributes(this, upath, io):

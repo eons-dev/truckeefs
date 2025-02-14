@@ -1,3 +1,19 @@
+"""
+lib/fs/fsop/dir/Unlink.py
+
+Purpose:
+Unlinks (removes) a directory from the filesystem.
+
+Place in Architecture:
+Handles directory deletion by updating both the local cache and issuing a delete command to the Tahoe backend.
+
+Interface:
+
+	A function (decorated with @eons.kind(FSOpUnlink)) that takes a directory upath and an I/O object and performs the unlink operation.
+
+TODOs/FIXMEs:
+None explicitly noted.
+"""
 
 @eons.kind(FSOpUnlink)
 def directory_unlink(this, upath, io, is_dir=False):

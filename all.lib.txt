@@ -1,0 +1,3386 @@
+./lib/cache/file/Handle.py
+class CachedFileHandle(object):
+	"""
+	Logical file handle. There may be multiple open file handles
+	corresponding to the same logical file.
+	"""
+
+	direct_io = False
+	keep_cache = False
+
+	def __init__(this, upath, inode, flags):
+		this.inode = inode
+		this.inode.incref()
+		this.lock = threading.RLock()
+		this.flags = flags
+		this.upath = upath
+
+		this.writeable = (this.flags & (os.O_RDONLY | os.O_RDWR | os.O_WRONLY)) in (os.O_RDWR, os.O_WRONLY)
+		this.readable = (this.flags & (os.O_RDONLY | os.O_RDWR | os.O_WRONLY)) in (os.O_RDWR, os.O_RDONLY)
+		this.append = (this.flags & os.O_APPEND)
+
+		if this.flags & os.O_ASYNC:
+			raise IOError(errno.ENOTSUP, "O_ASYNC flag is not supported")
+		if this.flags & os.O_DIRECT:
+			raise IOError(errno.ENOTSUP, "O_DIRECT flag is not supported")
+		if this.flags & os.O_DIRECTORY:
+			raise IOError(errno.ENOTSUP, "O_DIRECTORY flag is not supported")
+		if this.flags & os.O_SYNC:
+			raise IOError(errno.ENOTSUP, "O_SYNC flag is not supported")
+		if (this.flags & os.O_CREAT) and not this.writeable:
+			raise IOError(errno.EINVAL, "O_CREAT without writeable file")
+		if (this.flags & os.O_TRUNC) and not this.writeable:
+			raise IOError(errno.EINVAL, "O_TRUNC without writeable file")
+		if (this.flags & os.O_EXCL) and not this.writeable:
+			raise IOError(errno.EINVAL, "O_EXCL without writeable file")
+		if (this.flags & os.O_APPEND) and not this.writeable:
+			raise IOError(errno.EINVAL, "O_EXCL without writeable file")
+
+		if (this.flags & os.O_TRUNC):
+			this.inode.truncate(0)
+
+	def close(this):
+		with this.lock:
+			if this.inode is None:
+				raise IOError(errno.EBADF, "Operation on a closed file")
+			c = this.inode
+			this.inode = None
+			c.decref()
+
+	def read(this, io, offset, length):
+		with this.lock:
+			if this.inode is None:
+				raise IOError(errno.EBADF, "Operation on a closed file")
+			if not this.readable:
+				raise IOError(errno.EBADF, "File not readable")
+			return this.inode.read(io, offset, length)
+
+	def get_size(this):
+		with this.lock:
+			return this.inode.get_size()
+
+	def write(this, io, offset, data):
+		with this.lock:
+			if this.inode is None:
+				raise IOError(errno.EBADF, "Operation on a closed file")
+			if not this.writeable:
+				raise IOError(errno.EBADF, "File not writeable")
+			if this.append:
+				offset = None
+			return this.inode.write(io, offset, data)
+
+	def truncate(this, size):
+		with this.lock:
+			if this.inode is None:
+				raise IOError(errno.EBADF, "Operation on a closed file")
+			if not this.writeable:
+				raise IOError(errno.EBADF, "File not writeable")
+			return this.inode.truncate(size)DONE WITH ./lib/cache/file/Handle.py
+./lib/cache/file/Inode.py
+class CachedFileInode(object):
+	"""
+	Logical file on-disk. There should be only a single CachedFileInode
+	instance is per each logical file.
+	"""
+
+	def __init__(this, cachedb, upath, io, filecap, persistent=False):
+		this.upath = upath
+		this.closed = False
+		this.refcnt = 0
+		this.persistent = persistent
+		this.invalidated = False
+
+		# Use per-file keys for different files, for safer fallback
+		# in the extremely unlikely event of SHA512 hash collisions
+		filename, key = cachedb.GetFileNameAndKey(upath)
+		filename_state, key_state = cachedb.GetFileNameAndKey(upath, b'state')
+		filename_data, key_data = cachedb.GetFileNameAndKey(upath, b'data')
+
+		this.lock = threading.RLock()
+		this.cache_lock = threading.RLock()
+		this.dirty = False
+		this.f = None
+		this.f_state = None
+		this.f_data = None
+
+		this.stream_f = None
+		this.stream_offset = 0
+		this.stream_data = []
+
+		open_complete = False
+
+		try:
+			if filecap is None:
+				# Create new file
+				raise ValueError()
+
+			# Reuse cached metadata
+			this.f = FileOnDisk(filename, key=key, mode='r+b')
+			this.info = json_zlib_load(this.f)
+
+			if persistent:
+				# Reuse cached data
+				this.f_state = FileOnDisk(filename_state, key=key_state, mode='r+b')
+				this.f_data = FileOnDisk(filename_data, key=key_data, mode='r+b')
+				this.block_cache = BlockCachedFile.restore_state(this.f_data, this.f_state)
+				open_complete = True
+		except (IOError, OSError, ValueError):
+			open_complete = False
+			if this.f is not None:
+				this.f.close()
+				this.f = None
+			if this.f_state is not None:
+				this.f_state.close()
+			if this.f_data is not None:
+				this.f_data.close()
+
+		if not open_complete:
+			if this.f is None:
+				this.f = FileOnDisk(filename, key=key, mode='w+b')
+				try:
+					if filecap is not None:
+						this._load_info(filecap, io, iscap=True)
+					else:
+						this.info = ['file', {'size': 0}]
+						this.dirty = True
+				except IOError as err:
+					os.unlink(filename)
+					this.f.close()
+					raise
+
+			# Create a data file
+			this.f_data = FileOnDisk(filename_data, key=key_data, mode='w+b')
+
+			# Block cache on top of data file
+			this.block_cache = BlockCachedFile(this.f_data, this.info[1]['size'])
+
+			# Block data state file
+			this.f_state = FileOnDisk(filename_state, key=key_state, mode='w+b')
+
+		os.utime(this.f.path, None)
+		os.utime(this.f_data.path, None)
+		os.utime(this.f_state.path, None)
+
+	def _load_info(this, upath, io, iscap=False):
+		try:
+			this.info = io.get_info(upath, iscap=iscap)
+		except (HTTPError, IOError, ValueError) as err:
+			if isinstance(err, HTTPError) and err.code == 404:
+				raise IOError(errno.ENOENT, "no such file")
+			raise IOError(errno.EREMOTEIO, "failed to retrieve information")
+		this._save_info()
+
+	def _save_info(this):
+		this.f.truncate(0)
+		this.f.seek(0)
+		if 'retrieved' not in this.info[1]:
+			this.info[1]['retrieved'] = time.time()
+		json_zlib_dump(this.info, this.f)
+
+	def is_fresh(this, lifetime):
+		if 'retrieved' not in this.info[1]:
+			return True
+		return (this.info[1]['retrieved'] + lifetime >= time.time())
+
+	def incref(this):
+		with this.cache_lock:
+			this.refcnt += 1
+
+	def decref(this):
+		with this.cache_lock:
+			this.refcnt -= 1
+			if this.refcnt <= 0:
+				this.close()
+
+	def close(this):
+		with this.cache_lock, this.lock:
+			if not this.closed:
+				if this.stream_f is not None:
+					this.stream_f.close()
+					this.stream_f = None
+					this.stream_data = []
+				this.f_state.seek(0)
+				this.f_state.truncate(0)
+				this.block_cache.save_state(this.f_state)
+				this.f_state.close()
+				this.block_cache.close()
+				this.f.close()
+
+				if not this.persistent and this.upath is not None and not this.invalidated:
+					os.unlink(this.f_state.path)
+					os.unlink(this.f_data.path)
+			this.closed = True
+
+	def _do_rw(this, io, offset, length_or_data, write=False, no_result=False):
+		if write:
+			data = length_or_data
+			length = len(data)
+		else:
+			length = length_or_data
+
+		while True:
+			with this.cache_lock:
+				if write:
+					pos = this.block_cache.pre_write(offset, length)
+				else:
+					pos = this.block_cache.pre_read(offset, length)
+
+				if pos is None:
+					# cache ready
+					if no_result:
+						return None
+					elif write:
+						return this.block_cache.write(offset, data)
+					else:
+						return this.block_cache.read(offset, length)
+
+			# cache not ready -- fill it up
+			with this.lock:
+				try:
+					c_offset, c_length = pos
+
+					if this.stream_f is not None and (this.stream_offset > c_offset or
+													  c_offset >= this.stream_offset + 3*131072):
+						this.stream_f.close()
+						this.stream_f = None
+						this.stream_data = []
+
+					if this.stream_f is None:
+						this.stream_f = io.get_content(this.info[1]['ro_uri'], c_offset, iscap=True)
+						this.stream_offset = c_offset
+						this.stream_data = []
+
+					read_offset = this.stream_offset
+					read_bytes = sum(len(x) for x in this.stream_data)
+					while read_offset + read_bytes < c_offset + c_length:
+						block = this.stream_f.read(131072)
+
+						if not block:
+							this.stream_f.close()
+							this.stream_f = None
+							this.stream_data = []
+							break
+
+						this.stream_data.append(block)
+						read_bytes += len(block)
+
+						with this.cache_lock:
+							this.stream_offset, this.stream_data = this.block_cache.receive_cached_data(
+								this.stream_offset, this.stream_data)
+				except (HTTPError, IOError) as err:
+					if this.stream_f is not None:
+						this.stream_f.close()
+					this.stream_f = None
+					raise IOError(errno.EREMOTEIO, "I/O error: %s" % (str(err),))
+
+	def get_size(this):
+		with this.cache_lock:
+			return this.block_cache.get_size()
+
+	def get_attr(this):
+		return dict(type='file', size=this.get_size())
+
+	def read(this, io, offset, length):
+		return this._do_rw(io, offset, length, write=False)
+
+	def write(this, io, offset, data):
+		"""
+		Write data to file. If *offset* is None, it means append.
+		"""
+		with this.lock:
+			if len(data) > 0:
+				this.dirty = True
+				if offset is None:
+					offset = this.get_size()
+				this._do_rw(io, offset, data, write=True)
+
+	def truncate(this, size):
+		with this.cache_lock, this.lock:
+			if size != this.block_cache.get_size():
+				this.dirty = True
+			this.block_cache.truncate(size)
+
+	def _buffer_whole_file(this, io):
+		with this.cache_lock:
+			this._do_rw(io, 0, this.block_cache.get_size(), write=False, no_result=True)
+
+	def upload(this, io, parent_cap=None):
+		with this.cache_lock, this.lock:
+			# Buffer all data
+			this._buffer_whole_file(io)
+
+			# Upload the whole file
+			class Fwrapper(object):
+				def __init__(this, block_cache):
+					this.block_cache = block_cache
+					this.size = block_cache.get_size()
+					this.f = this.block_cache.get_file()
+					this.f.seek(0)
+				def __len__(this):
+					return this.size
+				def read(this, size):
+					return this.f.read(size)
+
+			if parent_cap is None:
+				upath = this.upath
+				iscap = False
+			else:
+				upath = parent_cap + "/" + ubasename(this.upath)
+				iscap = True
+
+			fw = Fwrapper(this.block_cache)
+			try:
+				filecap = io.put_file(upath, fw, iscap=iscap)
+			except (HTTPError, IOError) as err:
+				raise IOError(errno.EFAULT, "I/O error: %s" % (str(err),))
+
+			this.info[1]['ro_uri'] = filecap
+			this.info[1]['size'] = this.get_size()
+			this._save_info()
+
+			this.dirty = False
+
+			return filecap
+
+	def unlink(this):
+		with this.cache_lock, this.lock:
+			if this.upath is not None and not this.invalidated:
+				os.unlink(this.f.path)
+				os.unlink(this.f_state.path)
+				os.unlink(this.f_data.path)
+			this.upath = NoneDONE WITH ./lib/cache/file/Inode.py
+./lib/cache/dir/Handle.py
+class CachedDirHandle(object):
+	"""
+	Logical directory handle.
+	"""
+
+	def __init__(this, upath, inode):
+		this.inode = inode
+		this.inode.incref()
+		this.lock = threading.RLock()
+		this.upath = upath
+
+	def close(this):
+		with this.lock:
+			if this.inode is None:
+				raise IOError(errno.EBADF, "Operation on a closed dir")
+			c = this.inode
+			this.inode = None
+			c.decref()
+
+	def listdir(this):
+		with this.lock:
+			if this.inode is None:
+				raise IOError(errno.EBADF, "Operation on a closed dir")
+			return this.inode.listdir()
+
+	def get_attr(this):
+		with this.lock:
+			if this.inode is None:
+				raise IOError(errno.EBADF, "Operation on a closed dir")
+			return this.inode.get_attr()
+
+	def get_child_attr(this, childname):
+		with this.lock:
+			if this.inode is None:
+				raise IOError(errno.EBADF, "Operation on a closed dir")
+			return this.inode.get_child_attr(childname)
+DONE WITH ./lib/cache/dir/Handle.py
+./lib/cache/dir/Inode.py
+class CachedDirInode(object):
+	"""
+	Logical file on-disk directory. There should be only a single CachedDirInode
+	instance is per each logical directory.
+	"""
+
+	def __init__(this, cachedb, upath, io, dircap=None):
+		this.upath = upath
+		this.closed = False
+		this.refcnt = 0
+		this.lock = threading.RLock()
+		this.invalidated = False
+
+		this.filename, this.key = cachedb.GetFileNameAndKey(upath)
+
+		try:
+			with FileOnDisk(this.filename, key=this.key, mode='rb') as f:
+				this.info = json_zlib_load(f)
+			os.utime(this.filename, None)
+			return
+		except (IOError, OSError, ValueError):
+			pass
+
+		f = FileOnDisk(this.filename, key=this.key, mode='w+b')
+		try:
+			if dircap is not None:
+				this.info = io.get_info(dircap, iscap=True)
+			else:
+				this.info = io.get_info(upath)
+			this.info[1]['retrieved'] = time.time()
+			json_zlib_dump(this.info, f)
+		except (HTTPError, IOError, ValueError):
+			os.unlink(this.filename)
+			raise IOError(errno.EREMOTEIO, "failed to retrieve information")
+		finally:
+			f.close()
+
+	def _save_info(this):
+		with FileOnDisk(this.filename, key=this.key, mode='w+b') as f:
+			json_zlib_dump(this.info, f)
+
+	def is_fresh(this, lifetime):
+		return (this.info[1]['retrieved'] + lifetime >= time.time())
+
+	def incref(this):
+		with this.lock:
+			this.refcnt += 1
+
+	def decref(this):
+		with this.lock:
+			this.refcnt -= 1
+			if this.refcnt <= 0:
+				this.close()
+
+	def close(this):
+		with this.lock:
+			this.closed = True
+
+	def listdir(this):
+		return list(this.info[1]['children'].keys())
+
+	def get_attr(this):
+		return dict(type='dir')
+
+	def get_child_attr(this, childname):
+		assert isinstance(childname, str)
+		children = this.info[1]['children']
+		if childname not in children:
+			raise IOError(errno.ENOENT, "no such entry")
+
+		info = children[childname]
+
+		# tahoe:linkcrtime doesn't exist for entries created by "tahoe backup",
+		# but explicit 'mtime' and 'ctime' do, so use them.
+		ctime = info[1]['metadata'].get('tahoe', {}).get('linkcrtime')
+		mtime = info[1]['metadata'].get('tahoe', {}).get('linkcrtime')   # should this be 'linkmotime'?
+		if ctime is None:
+			ctime = info[1]['metadata']['ctime']
+		if mtime is None:
+			mtime = info[1]['metadata']['mtime']
+
+		if info[0] == 'dirnode':
+			return dict(type='dir', 
+						ro_uri=info[1]['ro_uri'],
+						rw_uri=info[1].get('rw_uri'),
+						ctime=ctime,
+						mtime=mtime)
+		elif info[0] == 'filenode':
+			return dict(type='file',
+						size=info[1]['size'],
+						ro_uri=info[1]['ro_uri'],
+						rw_uri=info[1].get('rw_uri'),
+						ctime=ctime,
+						mtime=mtime)
+		else:
+			raise IOError(errno.ENOENT, "invalid entry")
+
+	def unlink(this):
+		if this.upath is not None and not this.invalidated:
+			os.unlink(this.filename)
+		this.upath = None
+
+	def cache_add_child(this, basename, cap, size):
+		children = this.info[1]['children']
+
+		if basename in children:
+			info = children[basename]
+		else:
+			if cap is not None and cap.startswith('URI:DIR'):
+				info = ['dirnode', {'metadata': {'tahoe': {'linkcrtime': time.time()}}}]
+			else:
+				info = ['filenode', {'metadata': {'tahoe': {'linkcrtime': time.time()}}}]
+
+		if info[0] == 'dirnode':
+			info[1]['ro_uri'] = cap
+			info[1]['rw_uri'] = cap
+		elif info[0] == 'filenode':
+			info[1]['ro_uri'] = cap
+			info[1]['size'] = size
+
+		children[basename] = info
+		this._save_info()
+
+	def cache_remove_child(this, basename):
+		children = this.info[1]['children']
+		if basename in children:
+			del children[basename]
+			this._save_info()
+DONE WITH ./lib/cache/dir/Inode.py
+./lib/Utils.py
+import time
+
+# Sleep for exponentially increasing time. `n` is the number of times
+# sleep has been called.
+def ExponentialSleep(n, start=0.1, max_sleep=60):
+	sleep_time = min(start * (2**n), max_sleep)
+	time.sleep(sleep_time)
+
+class RandomString(object):
+	def __init__(this, size):
+		this.size = size
+
+	def __len__(this):
+		return this.size
+
+	def __getitem__(this, k):
+		if isinstance(k, slice):
+			return os.urandom(len(range(*k.indices(this.size))))
+		else:
+			raise IndexError("invalid index")
+
+
+def json_zlib_dump(obj, fp):
+	try:
+		fp.write(zlib.compress(json.dumps(obj).encode('utf-8'), 3))
+	except zlib.error:
+		raise ValueError("compression error")
+
+
+def json_zlib_load(fp):
+	try:
+		return json.load(ZlibDecompressor(fp))
+	except zlib.error:
+		raise ValueError("invalid compressed stream")
+
+
+class ZlibDecompressor(object):
+	def __init__(this, fp):
+		this.fp = fp
+		this.decompressor = zlib.decompressobj()
+		this.buf = b""
+		this.eof = False
+
+	def read(this, sz=None):
+		if sz is not None and not (sz > 0):
+			return b""
+
+		while not this.eof and (sz is None or sz > len(this.buf)):
+			block = this.fp.read(131072)
+			if not block:
+				this.buf += this.decompressor.flush()
+				this.eof = True
+				break
+			this.buf += this.decompressor.decompress(block)
+
+		if sz is None:
+			block = this.buf
+			this.buf = b""
+		else:
+			block = this.buf[:sz]
+			this.buf = this.buf[sz:]
+		return block
+
+
+def udirname(upath):
+	return "/".join(upath.split("/")[:-1])
+
+
+def ubasename(upath):
+	return upath.split("/")[-1]
+
+
+# constants for cache score calculation
+_DOWNLOAD_SPEED = 1e6  # byte/sec
+_LATENCY = 1.0 # sec
+
+def _access_rate(size, t):
+	"""Return estimated access rate (unit 1/sec). `t` is time since last access"""
+	if t < 0:
+		return 0.0
+	size_unit = 100e3
+	size_prob = 1 / (1 + (size/size_unit)**2)
+	return size_prob / (_LATENCY + t)
+
+def cache_score(size, t):
+	"""
+	Return cache score for file with size `size` and time since last access `t`.
+	Bigger number means higher priority.
+	"""
+
+	# Estimate how often it is downloaded
+	rate = _access_rate(size, t)
+
+	# Maximum size up to this time
+	dl_size = _DOWNLOAD_SPEED * max(0, t - _LATENCY)
+
+	# Time cost for re-retrieval
+	return rate * (_LATENCY + min(dl_size, size) / _DOWNLOAD_SPEED)
+
+DONE WITH ./lib/Utils.py
+./lib/RiverFS.py
+import eons
+import os
+import time
+import json
+import zlib
+import struct
+import errno
+import threading
+import codecs
+import heapq
+
+from cryptography.hazmat.primitives import hashes, hmac
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+from .Tahoe import *
+from .FileOnDisk import *
+# .block.Cache
+from .block.Cache import *
+
+
+# RiverFS is a generic file system that adds caching and encryption to a remote file system, specifically TahoeFS.
+# All operations should be asynchronous, stateless and scalable, with all state stored in *this.
+# NOTE: For thread safety, it is illegal to write to any RiverFS args after it has been started.
+# This class is functionally abstract and requires child classes to implement the Function method.
+class RiverFS(eons.Executor):
+	def __init__(this, name="RiverFS"):
+
+		super().__init__(name)
+
+		this.arg.kw.static.append('path')
+		this.arg.kw.static.append('rootcap')
+
+		this.arg.kw.optional["node_url"] = "http://127.0.0.1:3456"
+		this.arg.kw.optional["cache_dir"] = Path(".tahoe-cache")
+		this.arg.kw.optional["cache_data"] = False
+		this.arg.kw.optional["cache_size"] = "0" # Maximum size of the cache. 0 means no limit.
+		this.arg.kw.optional["cache_ttl"] = "10" # Cache lifetime for filesystem objects (seconds).
+		this.arg.kw.optional["net_timeout"] = "30" # Network timeout (seconds).
+		this.arg.kw.optional["work_dir"] = Path(".tahoe-work") # Where temporary files are stored while they wait to be uploaded.
+
+		this.last_size_check_time = 0
+
+		# Cache lock
+		this.lock = threading.RLock()
+
+		# Open files and dirs
+		this.open_items = {}
+
+		# Restrict cache size
+		this.RestrictCacheSize()
+
+		# Directory cache
+		this._max_item_cache = 500
+		this._item_cache = []
+
+		this.rootId = 1
+
+	# ValidateArgs is automatically called before Function, per eons.Functor.
+	def ValidateArgs(this):
+		super().ValidateArgs()
+
+		assert isinstance(this.rootcap, str)
+
+		try:
+			this.cache_size = parse_size(this.cache_size)
+		except ValueError:
+			raise eons.MissingArgumentError(f"error: --cache-size {this.cache_size} is not a valid size specifier")
+	
+		try:
+			this.cache_ttl = parse_lifetime(this.cache_ttl)
+		except ValueError:
+			raise eons.MissingArgumentError(f"error: --cache-ttl {this.cache_ttl} is not a valid lifetime")
+
+		try:
+			this.net_timeout = float(this.net_timeout)
+			if not 0 < this.net_timeout < float('inf'):
+				raise ValueError()
+		except ValueError:
+			raise eons.MissingArgumentError(f"error: --net-timeout {this.net_timeout} is not a valid timeout")
+
+		this.rootcap = this.rootcap.strip()
+		this.key, this.salt_hkdf = this.GeneratePrivateKey(this.rootcap)
+
+		Path(this.cache_dir).mkdir(parents=True, exist_ok=True)
+
+
+	def BeforeFunction(this):
+		this.source  = TahoeConnection(
+			this.node_url,
+			this.rootcap,
+			this.net_timeout
+		)
+
+		this.delta = RiverDelta()
+		this.delta() # Start the RiverDelta
+	
+	
+	# Override this in your child class.
+	def Function(this):
+		pass
+
+	
+	# Thread safe means of checking if an Inode already exists for the given upath
+	def GetCachedInodeByUpath(this, upath):
+		with this.lock:
+			for fun in executor.cache.functors:
+				if (isinstance(fun, Inode) and upath in fun.upaths):
+					return fun
+
+
+	# Thread safe means of checking if an Inode already exists for the given id
+	def GetCachedInodeById(this, id):
+		with this.lock:
+			for fun in executor.cache.functors:
+				if (isinstance(fun, Inode) and id == fun.id):
+					return fun
+
+
+	# Thread safe means of caching a new Inode
+	def CacheInode(this, inode):
+		with this.lock:
+			executor.cache.functors.append(Inode)
+
+			# If running RiverFS in a multi-server deployment, the inode may have been initialized on another server.
+			if (not inode.AreProcessStatesInitialized()):
+				inode.InitializeProcessStates()
+				inode.InitializeEphemerals()
+
+
+	def GetDatabaseSession(this):
+		return this.delta.sql
+
+	def GetSourceConnection(this):
+		return this.source
+
+	def GetUpathRootId(this):
+		return this.rootId
+
+	# Cache master key is derived from hashed rootcap and salt via
+	# PBKDF2, with a fixed number of iterations.
+	#
+	# The master key, combined with a second different salt, are
+	# used to generate per-file keys via HKDF-SHA256
+	def GeneratePrivateKey(this, rootcap):
+		# Get salt
+		salt_fn = os.path.join(this.cache_dir, 'salt')
+		try:
+			with open(salt_fn, 'rb') as f:
+				numiter = f.read(4)
+				salt = f.read(32)
+				salt_hkdf = f.read(32)
+				if len(numiter) != 4 or len(salt) != 32 or len(salt_hkdf) != 32:
+					raise ValueError()
+				numiter = struct.unpack('<I', numiter)[0]
+		except (IOError, OSError, ValueError):
+			# Start with new salt
+			rnd = os.urandom(64)
+			salt = rnd[:32]
+			salt_hkdf = rnd[32:]
+
+			# Determine suitable number of iterations
+			start = time.time()
+			count = 0
+			while True:
+				kdf = PBKDF2HMAC(
+					algorithm=hashes.SHA256(),
+					length=32,
+					salt=b"b"*len(salt),
+					iterations=10000,
+					backend=backend
+				)
+				kdf.derive(b"a"*len(rootcap.encode('ascii')))
+				count += 10000
+				if time.time() > start + 0.05:
+					break
+			numiter = max(10000, int(count * 1.0 / (time.time() - start)))
+
+			# Write salt etc.
+			with open(salt_fn, 'wb') as f:
+				f.write(struct.pack('<I', numiter))
+				f.write(salt)
+				f.write(salt_hkdf)
+
+		# Derive key
+		kdf = PBKDF2HMAC(
+			algorithm=hashes.SHA256(),
+			length=32,
+			salt=salt,
+			iterations=numiter,
+			backend=backend
+		)
+		key = kdf.derive(rootcap.encode('ascii'))
+
+		# HKDF private key material for per-file keys
+		return key, salt_hkdf
+
+	def WalkCache(this, root_upath=""):
+		"""
+		Walk through items in the cached directory tree, starting from
+		the given root point.
+
+		Yields
+		------
+		filename, upath
+			Filename and corresponding upath of a reached cached entry.
+
+		"""
+		stack = []
+
+		# Start from root
+		fn, key = this.GetFileNameAndKey(root_upath)
+		if os.path.isfile(fn):
+			stack.append((root_upath, fn, key))
+
+		# Walk the tree
+		while stack:
+			upath, fn, key = stack.pop()
+
+			if not os.path.isfile(fn):
+				continue
+
+			try:
+				with FileOnDisk(fn, key=key, mode='rb') as f:
+					data = json_zlib_load(f)
+					if data[0] == 'dirnode':
+						children = list(data[1].get('children', {}).items())
+					else:
+						children = []
+			except (IOError, OSError, ValueError):
+				continue
+
+			yield (os.path.basename(fn), upath)
+
+			for c_fn, c_info in children:
+				c_upath = os.path.join(upath, c_fn)
+				if c_info[0] == 'dirnode':
+					c_fn, c_key = this.GetFileNameAndKey(c_upath)
+					if os.path.isfile(c_fn):
+						stack.append((c_upath, c_fn, c_key))
+				elif c_info[0] == 'filenode':
+					for ext in (None, b'state', b'data'):
+						c_fn, c_key = this.GetFileNameAndKey(c_upath, ext=ext)
+						yield (os.path.basename(c_fn), c_upath)
+
+	def RestrictCacheSize(this):
+		def get_cache_score(entry):
+			fn, st = entry
+			return -cache_score(size=st.st_size, t=now-st.st_mtime)
+
+		with this.lock:
+			now = time.time()
+			if now < this.last_size_check_time + 60:
+				return
+
+			this.last_size_check_time = now
+
+			files = [os.path.join(this.cache_dir, fn) 
+					 for fn in os.listdir(this.cache_dir) 
+					 if fn != "salt"]
+			entries = [(fn, os.stat(fn)) for fn in files]
+			entries.sort(key=get_cache_score)
+
+			tot_size = 0
+			for fn, st in entries:
+				if tot_size + st.st_size > this.cache_size:
+					# unlink
+					os.unlink(fn)
+				else:
+					tot_size += st.st_size
+
+	def InvalidateCache(this, root_upath="", shallow=False):
+		if root_upath == "" and not shallow:
+			for f in this.open_items.values():
+				f.invalidated = True
+			this.open_items = {}
+			dead_file_set = os.listdir(this.cache_dir)
+		else:
+			dead_file_set = set()
+			for fn, upath in this.WalkCache(root_upath):
+				f = this.open_items.pop(upath, None)
+				if f is not None:
+					f.invalidated = True
+				dead_file_set.add(fn)
+				if shallow and upath != root_upath:
+					break
+
+		for basename in dead_file_set:
+			if basename == 'salt':
+				continue
+			fn = os.path.join(this.cache_dir, basename)
+			if os.path.isfile(fn):
+				os.unlink(fn)
+
+	def LookupCap(this, upath, io, read_only=True, lifetime=None):
+		if lifetime is None:
+			lifetime = this.cache_ttl
+
+		with this.lock:
+			if upath in this.open_items and this.open_items[upath].is_fresh(lifetime):
+				# shortcut
+				if read_only:
+					return this.open_items[upath].info[1]['ro_uri']
+				else:
+					return this.open_items[upath].info[1]['rw_uri']
+			elif upath == '':
+				# root
+				return None
+			else:
+				# lookup from parent
+				entry_name = ubasename(upath)
+				parent_upath = udirname(upath)
+
+				parent = this.open_dir(parent_upath, io, lifetime=lifetime)
+				try:
+					if read_only:
+						return parent.get_child_attr(entry_name)['ro_uri']
+					else:
+						return parent.get_child_attr(entry_name)['rw_uri']
+				finally:
+					this.close_dir(parent)
+
+	def GetFileNameAndKey(this, upath, ext=None):
+		path = upath.encode('utf-8')
+		nonpath = b"//\x00" # cannot occur in path, which is normalized
+
+		# Generate per-file key material via HKDF
+		info = path
+		if ext is not None:
+			info += nonpath + ext
+
+		hkdf = HKDF(
+			algorithm=hashes.SHA256(),
+			length=3*32,
+			salt=this.salt_hkdf,
+			info=info,
+			backend=backend
+		)
+		data = hkdf.derive(this.key)
+
+		# Generate key
+		key = data[:32]
+
+		# Generate filename
+		h = hmac.HMAC(key=data[32:], algorithm=hashes.SHA512(), backend=backend)
+		h.update(info)
+		fn = codecs.encode(h.finalize(), 'hex_codec').decode('ascii')
+		return os.path.join(this.cache_dir, fn), key
+DONE WITH ./lib/RiverFS.py
+./lib/NullString.py
+class NullString(object):
+	def __init__(this, size):
+		this.size = size
+
+	def __len__(this):
+		return this.size
+
+	def __getitem__(this, k):
+		if isinstance(k, slice):
+			return b"\x00" * len(range(*k.indices(this.size)))
+		else:
+			raise IndexError("invalid index")
+DONE WITH ./lib/NullString.py
+./lib/FileOnDisk.py
+"""
+Cache metadata and data of a directory tree.
+"""
+
+import eons
+import os
+import sys
+import struct
+import errno
+import fcntl
+
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.backends import default_backend
+
+backend = default_backend()
+
+BLOCK_SIZE = 131072
+
+
+class FileOnDisk(object):
+	"""
+	File encrypted with a key in AES-CBC mode, in BLOCK_SIZE blocks,
+	with random IV for each block.
+	"""
+
+	IV_SIZE = 16
+	HEADER_SIZE = IV_SIZE + 16
+
+	def __init__(this, path, key, mode='r+b', block_size=BLOCK_SIZE):
+		this.key = None
+		this.path = path
+
+		if len(key) != 32:
+			raise ValueError("Key must be 32 bytes")
+
+		if mode == 'rb':
+			fd = os.open(path, os.O_RDONLY)
+		elif mode == 'r+b':
+			fd = os.open(path, os.O_RDWR)
+		elif mode == 'w+b':
+			fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o0600)
+		else:
+			raise IOError(errno.EACCES, "Unsupported mode %r" % (mode,))
+
+		try:
+			# BSD locking on the file; only one fd can write at a time
+			if mode == 'rb':
+				fcntl.flock(fd, fcntl.LOCK_SH)
+			else:
+				fcntl.flock(fd, fcntl.LOCK_EX)
+
+			if mode == 'w+b':
+				# Truncate after locking
+				os.ftruncate(fd, 0)
+
+			this.fp = os.fdopen(fd, mode)
+		except:
+			os.close(fd)
+			raise
+
+		this.mode = mode
+		this.key = key
+
+		assert algorithms.AES.block_size//8 == 16
+
+		if block_size % 16 != 0:
+			raise ValueError("Block size must be multiple of AES block size")
+		this.block_size = block_size
+
+		if mode == 'w+b':
+			this.data_size = 0
+		else:
+			# Read header
+			try:
+				iv = this.fp.read(this.IV_SIZE)
+				if len(iv) != this.IV_SIZE:
+					raise ValueError()
+
+				cipher = Cipher(algorithms.AES(this.key), modes.CBC(iv), backend=backend)
+				decryptor = cipher.decryptor()
+
+				ciphertext = this.fp.read(16)
+				if len(ciphertext) != 16:
+					raise ValueError()
+				data = decryptor.update(ciphertext) + decryptor.finalize()
+				this.data_size = struct.unpack('<Q', data[8:])[0]
+
+				# Check the data size is OK
+				this.fp.seek(0, 2)
+				file_size = this.fp.tell()
+				num_blocks, remainder = divmod(file_size - this.HEADER_SIZE, this.IV_SIZE + block_size)
+				if remainder > 0:
+					num_blocks += 1
+				if this.data_size == 0 and num_blocks == 1:
+					# Zero-size files can contain 0 or 1 data blocks
+					num_blocks = 0
+				if not ((num_blocks-1)*block_size < this.data_size <= num_blocks*block_size):
+					raise ValueError()
+			except (IOError, struct.error, ValueError):
+				this.fp.close()
+				raise ValueError("invalid header data in file")
+
+		this.current_block = -1
+		this.block_cache = b""
+		this.block_dirty = False
+
+		this.offset = 0
+
+	def _write_header(this):
+		iv = os.urandom(this.IV_SIZE)
+		cipher = Cipher(algorithms.AES(this.key), modes.CBC(iv), backend=backend)
+		encryptor = cipher.encryptor()
+
+		this.fp.seek(0)
+		this.fp.write(iv)
+
+		data = os.urandom(8) + struct.pack("<Q", this.data_size)
+		this.fp.write(encryptor.update(data))
+		this.fp.write(encryptor.finalize())
+
+	def _flush_block(this):
+		if this.current_block < 0:
+			return
+		if not this.block_dirty:
+			return
+
+		iv = os.urandom(this.IV_SIZE)
+		cipher = Cipher(algorithms.AES(this.key), modes.CBC(iv), backend=backend)
+		encryptor = cipher.encryptor()
+
+		this.fp.seek(this.HEADER_SIZE + this.current_block * (this.IV_SIZE + this.block_size))
+		this.fp.write(iv)
+
+		off = (len(this.block_cache) % 16)
+		if off == 0:
+			this.fp.write(encryptor.update(bytes(this.block_cache)))
+		else:
+			# insert random padding
+			this.fp.write(encryptor.update(bytes(this.block_cache) + os.urandom(16-off)))
+		this.fp.write(encryptor.finalize())
+
+		this.block_dirty = False
+
+	def _load_block(this, i):
+		if i == this.current_block:
+			return
+
+		this._flush_block()
+
+		this.fp.seek(this.HEADER_SIZE + i * (this.IV_SIZE + this.block_size))
+		iv = this.fp.read(this.IV_SIZE)
+
+		if not iv:
+			# Block does not exist, past end of file
+			this.current_block = i
+			this.block_cache = b""
+			this.block_dirty = False
+			return
+
+		ciphertext = this.fp.read(this.block_size)
+		cipher = Cipher(algorithms.AES(this.key), modes.CBC(iv), backend=backend)
+		decryptor = cipher.decryptor()
+
+		if (i+1)*this.block_size > this.data_size:
+			size = this.data_size - i*this.block_size
+		else:
+			size = this.block_size
+
+		this.current_block = i
+		this.block_cache = (decryptor.update(ciphertext) + decryptor.finalize())[:size]
+		this.block_dirty = False
+
+	def seek(this, offset, whence=0):
+		if whence == 0:
+			pass
+		elif whence == 1:
+			offset = this.offset + offset
+		elif whence == 2:
+			offset += this.data_size
+		else:
+			raise IOError(errno.EINVAL, "Invalid whence")
+		if offset < 0:
+			raise IOError(errno.EINVAL, "Invalid offset")
+		this.offset = offset
+
+	def tell(this):
+		return this.offset
+
+	def _get_file_size(this):
+		this.fp.seek(0, 2)
+		return this.fp.tell()
+
+	def _read(this, size, offset):
+		if size is None:
+			size = this.data_size - offset
+		if size <= 0:
+			return b""
+
+		start_block, start_off = divmod(offset, this.block_size)
+		end_block, end_off = divmod(offset + size, this.block_size)
+		if end_off != 0:
+			end_block += 1
+
+		# Read and decrypt data
+		data = []
+		for i in range(start_block, end_block):
+			this._load_block(i)
+			data.append(this.block_cache)
+
+		if end_off != 0:
+			data[-1] = data[-1][:end_off]
+		data[0] = data[0][start_off:]
+		return b"".join(map(bytes, data))
+
+	def _write(this, data, offset):
+		size = len(data)
+		start_block, start_off = divmod(offset, this.block_size)
+		end_block, end_off = divmod(offset + size, this.block_size)
+
+		k = 0
+
+		if this.mode == 'rb':
+			raise IOError(errno.EACCES, "Write to a read-only file")
+
+		# Write first block, if partial
+		if start_off != 0 or end_block == start_block:
+			this._load_block(start_block)
+			data_block = data[:(this.block_size - start_off)]
+			this.block_cache = this.block_cache[:start_off] + data_block + this.block_cache[start_off+len(data_block):]
+			this.block_dirty = True
+			k += 1
+			start_block += 1
+
+		# Write full blocks
+		for i in range(start_block, end_block):
+			if this.current_block != i:
+				this._flush_block()
+			this.current_block = i
+			this.block_cache = data[k*this.block_size-start_off:(k+1)*this.block_size-start_off]
+			this.block_dirty = True
+			k += 1
+
+		# Write last partial block
+		if end_block > start_block and end_off != 0:
+			this._load_block(end_block)
+			data_block = data[k*this.block_size-start_off:(k+1)*this.block_size-start_off]
+			this.block_cache = data_block + this.block_cache[len(data_block):]
+			this.block_dirty = True
+
+		this.data_size = max(this.data_size, offset + len(data))
+
+	def read(this, size=None):
+		data = this._read(size, this.offset)
+		this.offset += len(data)
+		return data
+
+	def write(this, data):
+		if this.data_size < this.offset:
+			# Write past end
+			s = NullString(this.offset - this.data_size)
+			this._write(s, this.data_size)
+
+		this._write(data, this.offset)
+		this.offset += len(data)
+
+	def truncate(this, size):
+		last_block, last_off = divmod(size, this.block_size)
+
+		this._load_block(last_block)
+		last_block_data = this.block_cache
+
+		# truncate to block boundary
+		this._flush_block()
+		sz = this.HEADER_SIZE + last_block * (this.IV_SIZE + this.block_size)
+		this.fp.truncate(sz)
+		this.data_size = last_block * this.block_size
+		this.current_block = -1
+		this.block_cache = b""
+		this.block_dirty = False
+
+		# rewrite the last block
+		if last_off != 0:
+			this._write(last_block_data[:last_off], this.data_size)
+
+		# add null padding
+		if this.data_size < size:
+			s = NullString(size - this.data_size)
+			this._write(s, this.data_size)
+
+	def __enter__(this):
+		return this
+
+	def __exit__(this, exc_type, exc_value, traceback):
+		this.close()
+		return False
+
+	def flush(this):
+		if this.mode != 'rb':
+			this._flush_block()
+			this._write_header()
+		this.fp.flush()
+
+	def close(this):
+		if this.key is None:
+			return
+		if this.mode != 'rb':
+			this.flush()
+		this.fp.close()
+		this.key = None
+
+	def __del__(this):
+		this.close()DONE WITH ./lib/FileOnDisk.py
+./lib/block/Cache.py
+import struct
+import errno
+import array
+import heapq
+import zlib
+import itertools
+from .Storage import *
+from .Utils import *
+
+class BlockCachedFile(object):
+	"""
+	I am temporary file, caching data for a remote file. I support
+	overwriting data. I cache remote data on a per-block basis and
+	keep track of which blocks need still to be retrieved. Before each
+	read/write operation, my pre_read or pre_write method needs to be
+	called --- these give the ranges of data that need to be retrieved
+	from the remote file and fed to me (via receive_cached_data)
+	before the read/write operation can succeed. I am fully
+	synchronous.
+	"""
+
+	def __init__(this, f, initial_cache_size, block_size=None):
+		if block_size is None:
+			block_size = BLOCK_SIZE
+		this.size = initial_cache_size
+		this.storage = BlockStorage(f, block_size)
+		this.block_size = this.storage.block_size
+		this.first_uncached_block = 0
+		this.cache_size = initial_cache_size
+
+	def save_state(this, f):
+		this.storage.save_state(f)
+		f.write(struct.pack('<QQQ', this.size, this.cache_size, this.first_uncached_block))
+
+	@classmethod
+	def restore_state(cls, f, state_file):
+		storage = BlockStorage.restore_state(f, state_file)
+		s = state_file.read(3 * 8)
+		size, cache_size, first_uncached_block = struct.unpack('<QQQ', s)
+
+		this = cls.__new__(cls)
+		this.storage = storage
+		this.size = size
+		this.cache_size = cache_size
+		this.first_uncached_block = first_uncached_block
+		this.block_size = this.storage.block_size
+		return this
+
+	def _pad_file(this, new_size):
+		"""
+		Append zero bytes that the virtual size grows to new_size
+		"""
+		if new_size <= this.size:
+			return
+
+		# Fill remainder blocks in the file with nulls; the last
+		# existing block, if partial, is implicitly null-padded
+		start, mid, end = block_range(this.size, new_size - this.size, block_size=this.block_size)
+
+		if start is not None and start[1] == 0:
+			this.storage[start[0]] = None
+
+		if mid is not None:
+			for idx in range(*mid):
+				this.storage[idx] = None
+
+		if end is not None:
+			this.storage[end[0]] = None
+
+		this.size = new_size
+
+	def receive_cached_data(this, offset, data_list):
+		"""
+		Write full data blocks to file, unless they were not written
+		yet. Returns (new_offset, new_data_list) containing unused,
+		possibly reuseable data. data_list is a list of strings.
+		"""
+		data_size = sum(len(data) for data in data_list)
+
+		start, mid, end = block_range(offset, data_size, last_pos=this.cache_size,
+									  block_size=this.block_size)
+
+		if mid is None:
+			# not enough data for full blocks
+			return offset, data_list
+
+		data = b"".join(data_list)
+
+		i = 0
+		if start is not None:
+			# skip initial part
+			i = this.block_size - start[1]
+
+		for j in range(*mid):
+			if j not in this.storage:
+				block = data[i:i+this.block_size]
+				this.storage[j] = block
+			i += min(this.block_size, data_size - i)
+
+		if mid[0] <= this.first_uncached_block:
+			this.first_uncached_block = max(this.first_uncached_block, mid[1])
+
+		# Return trailing data for possible future use
+		if i < data_size:
+			data_list = [data[i:]]
+		else:
+			data_list = []
+		offset += i
+		return (offset, data_list)
+
+	def get_size(this):
+		return this.size
+
+	def get_file(this):
+		# Pad file to full size before returning file handle
+		this._pad_file(this.get_size())
+		return BlockCachedFileHandle(this)
+
+	def close(this):
+		this.storage.f.close()
+		this.storage = None
+
+	def truncate(this, size):
+		if size < this.size:
+			this.storage.truncate(ceildiv(size, this.block_size))
+			this.size = size
+		elif size > this.size:
+			this._pad_file(size)
+
+		this.cache_size = min(this.cache_size, size)
+
+	def write(this, offset, data):
+		if offset > this.size:
+			# Explicit POSIX behavior for write-past-end
+			this._pad_file(offset)
+
+		if len(data) == 0:
+			# noop
+			return
+
+		# Perform write
+		start, mid, end = block_range(offset, len(data), block_size=this.block_size)
+
+		# Pad virtual size
+		this._pad_file(offset + len(data))
+
+		# Write first block
+		if start is not None:
+			block = this.storage[start[0]]
+			i = start[2] - start[1]
+			this.storage[start[0]] = block[:start[1]] + data[:i] + block[start[2]:]
+		else:
+			i = 0
+
+		# Write intermediate blocks
+		if mid is not None:
+			for idx in range(*mid):
+				this.storage[idx] = data[i:i+this.block_size]
+				i += this.block_size
+
+		# Write last block
+		if end is not None:
+			block = this.storage[end[0]]
+			this.storage[end[0]] = data[i:] + block[end[1]:]
+
+	def read(this, offset, length):
+		length = max(0, min(this.size - offset, length))
+		if length == 0:
+			return b''
+
+		# Perform read
+		start, mid, end = block_range(offset, length, block_size=this.block_size)
+
+		datas = []
+
+		# Read first block
+		if start is not None:
+			datas.append(this.storage[start[0]][start[1]:start[2]])
+
+		# Read intermediate blocks
+		if mid is not None:
+			for idx in range(*mid):
+				datas.append(this.storage[idx])
+
+		# Read last block
+		if end is not None:
+			datas.append(this.storage[end[0]][:end[1]])
+
+		return b"".join(datas)
+
+	def pre_read(this, offset, length):
+		"""
+		Return (offset, length) of the first cache fetch that need to be
+		performed and the results fed into `receive_cached_data` before a read
+		operation can be performed. There may be more than one fetch
+		necessary. Return None if no fetch is necessary.
+		"""
+
+		# Limit to inside the cached area
+		cache_end = ceildiv(this.cache_size, this.block_size) * this.block_size
+		length = max(0, min(length, cache_end - offset))
+		if length == 0:
+			return None
+
+		# Find bounds of the read operation
+		start_block = offset//this.block_size
+		end_block = ceildiv(offset + length, this.block_size)
+
+		# Combine consequent blocks into a single read
+		j = max(start_block, this.first_uncached_block)
+		while j < end_block and j in this.storage:
+			j += 1
+		if j >= end_block:
+			return None
+
+		for k in range(j+1, end_block):
+			if k in this.storage:
+				end = k
+				break
+		else:
+			end = end_block
+
+		if j >= end:
+			return None
+
+		start_pos = j * this.block_size
+		end_pos = end * this.block_size
+		if start_pos < this.cache_size:
+			return (start_pos, min(end_pos, this.cache_size) - start_pos)
+
+		return None
+
+	def pre_write(this, offset, length):
+		"""
+		Similarly to pre_read, but for write operations.
+		"""
+		start, mid, end = block_range(offset, length, block_size=this.block_size)
+
+		# Writes only need partially available blocks to be in the cache
+		for item in (start, end):
+			if item is not None and item[0] >= this.first_uncached_block and item[0] not in this.storage:
+				start_pos = item[0] * this.block_size
+				end_pos = (item[0] + 1) * this.block_size
+				if start_pos < this.cache_size:
+					return (start_pos, min(this.cache_size, end_pos) - start_pos)
+
+		# No reads required
+		return None
+
+
+class BlockCachedFileHandle(object):
+	"""
+	Read-only access to BlockCachedFile, as if it was a contiguous file
+	"""
+	def __init__(this, block_cached_file):
+		this.block_cached_file = block_cached_file
+		this.pos = 0
+
+	def seek(this, offset, whence=0):
+		if whence == 0:
+			this.pos = offset
+		elif whence == 1:
+			this.pos += offset
+		elif whence == 2:
+			this.pos = offset + this.block_cached_file.get_size()
+		else:
+			raise ValueError("Invalid whence")
+
+	def read(this, size=None):
+		if size is None:
+			size = max(0, this.block_cached_file.get_size() - this.pos)
+		data = this.block_cached_file.read(this.pos, size)
+		this.pos += len(data)
+		return dataDONE WITH ./lib/block/Cache.py
+./lib/block/Utils.py
+def ceildiv(a, b):
+	"""Compute ceil(a/b); i.e. rounded towards positive infinity"""
+	return 1 + (a-1)//b
+
+def block_range(offset, length, block_size, last_pos=None):
+	"""
+	Get the blocks that overlap with data range [offset, offset+length]
+
+	Parameters
+	----------
+	offset, length : int
+		Range specification
+	last_pos : int, optional
+		End-of-file position. If the data range goes over the end of the file,
+		the last block is the last block in `mid`, and `end` is None.
+
+	Returns
+	-------
+	start : (idx, start_pos, end_pos) or None
+		Partial block at the beginning; block[start_pos:end_pos] has the data. If missing: None
+	mid : (start_idx, end_idx)
+		Range [start_idx, end_idx) of full blocks in the middle. If missing: None
+	end : (idx, end_pos)
+		Partial block at the end; block[:end_pos] has the data. If missing: None
+
+	"""
+	if last_pos is not None:
+		length = max(min(last_pos - offset, length), 0)
+
+	if length == 0:
+		return None, None, None
+
+	start_block, start_pos = divmod(offset, block_size)
+	end_block, end_pos = divmod(offset + length, block_size)
+
+	if last_pos is not None:
+		if offset + length == last_pos and end_pos > 0:
+			end_block += 1
+			end_pos = 0
+
+	if start_block == end_block:
+		if start_pos == end_pos:
+			return None, None, None
+		return (start_block, start_pos, end_pos), None, None
+
+	mid = None
+
+	if start_pos == 0:
+		start = None
+		mid = (start_block, end_block)
+	else:
+		start = (start_block, start_pos, block_size)
+		if start_block+1 < end_block:
+			mid = (start_block+1, end_block)
+
+	if end_pos == 0:
+		end = None
+	else:
+		end = (end_block, end_pos)
+
+	return start, mid, end
+DONE WITH ./lib/block/Utils.py
+./lib/block/Storage.py
+import struct
+import errno
+import array
+import heapq
+import zlib
+import itertools
+from .Utils import *
+
+
+BLOCK_SIZE = 131072
+BLOCK_UNALLOCATED = -1
+BLOCK_ZERO = -2
+
+
+
+
+class BlockStorage(object):
+	"""
+	File storing fixed-size blocks of data.
+	"""
+
+	def __init__(this, f, block_size):
+		this.f = f
+		this.block_size = block_size
+		this.block_map = array.array('l')
+		this.zero_block = b"\x00"*this.block_size
+		this._reconstruct_free_map()
+
+	def save_state(this, f):
+		f.truncate(0)
+		f.seek(0)
+		f.write(b"BLK2")
+
+		# Using zlib here is mainly for obfuscating information on the
+		# total size of sparse files. The size of the map file will
+		# correlate with the amount of downloaded data, but
+		# compression reduces its correlation with the total size of
+		# the file.
+		block_map_data = zlib.compress(this.block_map.tobytes(), 9)
+		f.write(struct.pack('<QQ', this.block_size, len(block_map_data)))
+		f.write(block_map_data)
+
+	@classmethod
+	def restore_state(cls, f, state_file):
+		hdr = state_file.read(4)
+		if hdr != b"BLK2":
+			raise ValueError("invalid block storage state file")
+		s = state_file.read(2 * 8)
+		block_size, data_size = struct.unpack('<QQ', s)
+
+		try:
+			s = zlib.decompress(state_file.read(data_size))
+		except zlib.error:
+			raise ValueError("invalid block map data")
+		block_map = array.array('l')
+		block_map.frombytes(s)
+		del s
+
+		this = cls.__new__(cls)
+		this.f = f
+		this.block_size = block_size
+		this.block_map = block_map
+		this.zero_block = b"\x00"*this.block_size
+		this._reconstruct_free_map()
+		return this
+
+	def _reconstruct_free_map(this):
+		if this.block_map:
+			max_block = max(this.block_map)
+		else:
+			max_block = -1
+
+		if max_block < 0:
+			this.free_block_idx = 0
+			this.free_map = []
+			return
+
+		mask = array.array('b', itertools.repeat(0, max_block+1))
+		for x in this.block_map:
+			if x >= 0:
+				mask[x] = 1
+
+		free_map = [j for j, x in enumerate(mask) if x == 0]
+		heapq.heapify(free_map)
+
+		this.free_map = free_map
+		this.free_block_idx = max_block + 1
+
+	def _get_free_block_idx(this):
+		if this.free_map:
+			return heapq.heappop(this.free_map)
+		idx = this.free_block_idx
+		this.free_block_idx += 1
+		return idx
+
+	def _add_free_block_idx(this, idx):
+		heapq.heappush(this.free_map, idx)
+
+	def _truncate_free_map(this, end_block):
+		this.free_block_idx = end_block
+		last_map_size = len(this.free_map)
+		this.free_map = [x for x in this.free_map if x < end_block]
+		if last_map_size != len(this.free_map):
+			heapq.heapify(this.free_map)
+
+	def __contains__(this, idx):
+		if not idx >= 0:
+			raise ValueError("Invalid block index")
+		if idx >= len(this.block_map):
+			return False
+		return this.block_map[idx] != BLOCK_UNALLOCATED
+
+	def __getitem__(this, idx):
+		if idx not in this:
+			raise KeyError("Block %d not allocated" % (idx,))
+
+		block_idx = this.block_map[idx]
+		if block_idx >= 0:
+			this.f.seek(this.block_size * block_idx)
+			block = this.f.read(this.block_size)
+			if len(block) < this.block_size:
+				# Partial block (end-of-file): consider zero-padded
+				block += b"\x00"*(this.block_size - len(block))
+			return block
+		elif block_idx == BLOCK_ZERO:
+			return this.zero_block
+		else:
+			raise IOError(errno.EIO, "Corrupted block map data")
+
+	def __setitem__(this, idx, data):
+		if not idx >= 0:
+			raise ValueError("Invalid block index")
+		if idx >= len(this.block_map):
+			this.block_map.extend(itertools.repeat(BLOCK_UNALLOCATED, idx + 1 - len(this.block_map)))
+
+		if data is None or data == this.zero_block:
+			block_idx = this.block_map[idx]
+			if block_idx >= 0:
+				this._add_free_block_idx(block_idx)
+			this.block_map[idx] = BLOCK_ZERO
+		else:
+			if len(data) > this.block_size:
+				raise ValueError("Too large data block")
+
+			block_idx = this.block_map[idx]
+			if not block_idx >= 0:
+				block_idx = this._get_free_block_idx()
+
+			this.block_map[idx] = block_idx
+
+			if len(data) < this.block_size:
+				# Partial blocks are OK at the end of the file
+				# only. Such blocks will be automatically zero-padded
+				# by POSIX if writes are done to subsequent blocks.
+				# Other blocks need explicit padding.
+				this.f.seek(0, 2)
+				pos = this.f.tell()
+				if pos > this.block_size * block_idx + len(data):
+					data += b"\x00" * (this.block_size - len(data))
+
+			this.f.seek(this.block_size * block_idx)
+			this.f.write(data)
+
+	def truncate(this, num_blocks):
+		this.block_map = this.block_map[:num_blocks]
+
+		end_block = 0
+		if this.block_map:
+			end_block = max(0, max(this.block_map) + 1)
+		this.f.truncate(this.block_size * end_block)
+		this._truncate_free_map(end_block)
+DONE WITH ./lib/block/Storage.py
+./lib/tahoe/TahoeResponse.py
+from urllib.request import Request, urlopen
+
+
+class TahoeResponse(object):
+	def __init__(this, connection, req, is_put, timeout):
+		this.connection = connection
+
+		# XXX: We use default timeout for PUT requests, for now:
+		#	  Solution would be to limit send buffer size, but urllib2
+		#	  doesn't easily allow this Switching to requests module probably
+		#	  would help.
+		#
+		# We recv data in relatively small blocks, so that blocking
+		# for recv corresponds roughly to network activity. POST
+		# requests are also small, so that the situation is the same.
+		#
+		# However, PUT requests may upload large amounts of data. The
+		# send buffer can also be fairly large, so that all the data
+		# may fit into it. In this case, we end up blocking on reading
+		# the server response, which arrives only after the data in
+		# the buffer is sent. In this case, timeout can arrive even if
+		# the computer is still successfully uploading data ---
+		# blocking does not correspond to network activity.
+		#
+		if is_put:
+			this.response = urlopen(req)
+		else:
+			this.response = urlopen(req, timeout=timeout)
+		this.is_put = is_put
+
+	def read(this, size=None):
+		return this.response.read(size)
+
+	def close(this):
+		this.response.close()
+		this.connection._release_response(this, this.is_put)
+DONE WITH ./lib/tahoe/TahoeResponse.py
+./lib/tahoe/TahoeConnection.py
+from urllib.request import Request, urlopen
+from urllib.parse import quote
+from urllib.error import HTTPError
+import json
+import threading
+import shutil
+import logging
+from .TahoeResponse import *
+
+class TahoeConnection(object):
+	def __init__(this, base_url, rootcap, timeout, max_connections=10):
+		assert isinstance(base_url, str)
+		assert isinstance(rootcap, str)
+
+		this.base_url = base_url.rstrip('/') + '/uri'
+		this.rootcap = rootcap.encode('utf-8')
+
+		this.connections = []
+		this.lock = threading.Lock()
+
+		put_conns = max(1, max_connections//2)
+		get_conns = max(1, max_connections - put_conns)
+
+		this.get_semaphore = threading.Semaphore(get_conns)
+		this.put_semaphore = threading.Semaphore(put_conns)
+		this.timeout = timeout
+
+	def _get_response(this, req, is_put):
+		semaphore = this.put_semaphore if is_put else this.get_semaphore
+
+		semaphore.acquire()
+		try:
+			response = TahoeResponse(this, req, is_put, this.timeout)
+			with this.lock:
+				this.connections.append(response)
+				return response
+		except:
+			semaphore.release()
+			raise
+
+	def _release_response(this, response, is_put):
+		semaphore = this.put_semaphore if is_put else this.get_semaphore
+
+		with this.lock:
+			if response in this.connections:
+				semaphore.release()
+				this.connections.remove(response)
+
+	def wait_until_write_allowed(this):
+		# Force wait if put queue is full
+		this.put_semaphore.acquire()
+		this.put_semaphore.release()
+
+	def _url(this, path, params={}, iscap=False):
+		assert isinstance(path, str), path
+
+		path = quote(path).lstrip('/')
+		if iscap:
+			path = this.base_url + '/' + path
+		else:
+			path = this.base_url + '/' + this.rootcap.decode('ascii') + '/' + path
+
+		if params:
+			path += '?'
+
+			for k, v in list(params.items()):
+				assert isinstance(k, str), k
+				assert isinstance(v, str), v
+				if not path.endswith('?'):
+					path += '&'
+				k = quote(k, safe='')
+				v = quote(v, safe='')
+				path += k
+				path += '='
+				path += v
+
+		return path
+
+	def _get_request(this, method, path, offset=None, length=None, data=None, params={}, iscap=False):
+		headers = {'Accept': 'text/plain'}
+
+		if offset is not None or length is not None:
+			if offset is None:
+				start = "0"
+				offset = 0
+			else:
+				start = str(offset)
+			if length is None:
+				end = ""
+			else:
+				end = str(offset + length - 1)
+			headers['Range'] = 'bytes=' + start + '-' + end
+
+		req = Request(this._url(path, params, iscap=iscap),
+					  data=data,
+					  headers=headers)
+		req.get_method = lambda: method
+		return req
+
+	def _get(this, path, params={}, offset=None, length=None, iscap=False):
+		req = this._get_request("GET", path, params=params, offset=offset, length=length, iscap=iscap)
+		return this._get_response(req, False)
+
+	def _post(this, path, data=None, params={}, iscap=False):
+		req = this._get_request("POST", path, data=data, params=params, iscap=iscap)
+		return this._get_response(req, False)
+
+	def _put(this, path, data=None, params={}, iscap=False):
+		req = this._get_request("PUT", path, data=data, params=params, iscap=iscap)
+		return this._get_response(req, True)
+
+	def _delete(this, path, params={}, iscap=False):
+		req = this._get_request("DELETE", path, params=params, iscap=iscap)
+		return this._get_response(req, False)
+
+	def get_info(this, path, iscap=False):
+		f = this._get(path, {'t': 'json'}, iscap=iscap)
+		try:
+			data = json.load(f)
+		finally:
+			f.close()
+		return data
+
+	def get_content(this, path, offset=None, length=None, iscap=False):
+		return this._get(path, offset=offset, length=length, iscap=iscap)
+
+	def put_file(this, path, f, iscap=False):
+		f = this._put(path, data=f, iscap=iscap)
+		try:
+			return f.read().decode('utf-8').strip()
+		finally:
+			f.close()
+
+	def delete(this, path, iscap=False):
+		f = this._delete(path, iscap=iscap)
+		try:
+			return f.read().decode('utf-8').strip()
+		finally:
+			f.close()
+
+	def mkdir(this, path, iscap=False):
+		f = this._post(path, params={'t': 'mkdir'}, iscap=iscap)
+		try:
+			return f.read().decode('utf-8').strip()
+		finally:
+			f.close()
+DONE WITH ./lib/tahoe/TahoeConnection.py
+./lib/tahoe/TahoeSyncWorker.py
+import eons
+from ..RiverFS import RiverFS
+
+class TahoeSyncWorker(eons.Functor):
+
+	# Common tasks for SyncWorkers.
+	# If any of these fail, the system (e.g. database) will be in a bad state.
+	@staticmethod
+	def SyncWorkerCommon(kwargs):
+
+		# Get our initial data.
+		try:
+			inodeId = kwargs.pop('inode_id')
+		except Exception as e:
+			logging.error(f"Error syncing: {e}")
+			# Can't clear database. This is also bad.
+			raise e
+
+		# Initialize the Executor.
+		try:
+			executor = RiverFS(f"RiverFS Sync for {inodeId}")
+			executor(**kwargs)
+		except Exception as e:
+			logging.error(f"Error syncing {inodeId}: {e}")
+			# Can't clear database. This is bad.
+			raise e
+
+		return executor, inodeId
+
+
+	# Sync an Inode downstream from the source (i.e. Tahoe).
+	# This is a high(ish) priority background task.
+	# It should be spawned from multiprocessing.Process.
+	# Most logic is implemented in the Inode subclass.
+	# To modify the sync behavior, override the following methods in your Inode subclass:
+	# - BeforePullDownstream
+	# - PullDownstream
+	# - AfterPullDownstream
+	#
+	# NOTE: THIS RUNS ON DEMAND! It DOES NOT regularly check for changes upstream.
+	# This means you cannot use Tahoe to synchronize data across regions / geo-distributed servers.
+	#
+	@staticmethod
+	def DownstreamSyncWorker(kwargs):
+		executor, inodeId = TahoeSyncWorker.SyncWorkerCommon(kwargs)
+
+		try:
+			inode = TahoeSyncWorker.GetInode(executor, inodeId)
+			TahoeSyncWorker.PullDownstreamFromSource(executor, inode)
+		except Exception as e:
+			logging.error(f"Error syncing {inodeId}: {e}")
+			TahoeSyncWorker.CompleteSync(executor, inodeId, False)
+			raise e
+		
+		TahoeSyncWorker.CompleteSync(executor, inodeId)
+
+
+	# Sync an Inode upstream toward the source (i.e. Tahoe).
+	# This is a background task that runs with the lowest possible priority.
+	# It should be spawned from multiprocessing.Process.
+	# See Inode.Save for an example.
+	#
+	# To modify the sync behavior, override the following methods in your Inode subclass:
+	# - Freeze
+	# - BeforePushUpstream
+	# - PushUpstream
+	# - AfterPushUpstream
+	@staticmethod
+	def UpstreamSyncWorker(kwargs):
+		# Set the process priority to low (nice level 19)
+		# In Unix-like systems, the nice level ranges from -20 (highest priority) to 19 (lowest priority). 
+		# Setting the nice level to 19 ensures that the sync process runs with the lowest possible priority, which is ideal for background tasks that shouldn't interfere with the performance of higher-priority tasks, like user interactions or other critical processes.
+		os.nice(19)
+
+		executor, inodeId = TahoeSyncWorker.SyncWorkerCommon(kwargs)
+		
+		try:
+			frozen_data = json.loads(kwargs.pop('frozen_data'))
+		except Exception as e:
+			try: 
+				frozen_data = TahoeSyncWorker.GetInode(executor, inodeId).Freeze()
+			except Exception as e:
+				logging.error(f"Error syncing {inodeId}: {e}")
+				TahoeSyncWorker.CompleteSync(executor, inodeId, False)
+				raise e
+
+		# Startup loop.
+		# Make sure any async tasks have finished writing before we begin syncing.
+		# 5 minute timeout.
+		inode = TahoeSyncWorker.GetInode(executor, inodeId)
+		for i in range(300):
+			syncPid = inode.GetEphemeral('sync_pid')
+			syncHost = inode.GetEphemeral('sync_host')
+			if ((syncPid is None or not len(syncPid) or (syncHost is None or not len(syncHost)))):
+				if (i == 299):
+					logging.error(f"Sync process for {inodeId} ({obj.name}) timed out.")
+					TahoeSyncWorker.CompleteSync(executor, inodeId, False)
+					raise Exception(f"Sync process for {inodeId} ({obj.name}) timed out.")
+				else:
+					sleep(1)
+					continue
+			elif (syncPid != os.getpid() or syncHost != socket.gethostname()):
+				raise Exception(f"Sync process already running for {inodeId} ({syncPid} is running on {syncHost}, but I am {os.getpid()} on {socket.gethostname()}).")
+			else:
+				break
+
+		# Sync loop.
+		while (True):
+			try:
+				# Get the Inode we'll be syncing.
+				inode = TahoeSyncWorker.GetInode(executor, inodeId)
+
+				# Check if the data changed while we were syncing the object.
+				# Doing this here (rather than spawning a new process) helps conserve resources and should make syncing faster overall.
+				if (frozen_data is None):
+					syncAgain = inode.GetEphemeral('sync_again', coerceType=bool)
+					if (not syncAgain):
+						logging.info(f"Inode {inode.name} (ID: {inodeId}) has no frozen data to sync. Exiting.")
+						break
+
+					frozen_data = inode.Freeze()
+
+				# Refresh the Ephemeral values.
+				inode.SetEphemeral('sync_again', False)
+				if (inode.SetEphemeral('sync_pid', os.getpid(), os.getpid()) is None
+					or inode.SetEphemeral('sync_host', socket.gethostname(), socket.gethostname()) is None
+				):
+					logging.error(f"Sync process for {inodeId} ({inode.name}) was interrupted.")
+					TahoeSyncWorker.CompleteSync(executor, inodeId, False)
+					raise Exception(f"Sync process for {inodeId} ({inode.name}) was interrupted.")
+
+				# Perform the Sync.
+				if (inode.frozen is None or not len(inode.frozen)):
+					inode.frozen = frozen_data
+				TahoeSyncWorker.PushUpstreamToSource(executor, inode)
+				frozen_data = None
+
+			except Exception as e:
+				logging.error(f"Error syncing {inodeId}: {e}")
+				TahoeSyncWorker.CompleteSync(executor, inodeId, False)
+				raise e
+
+		# Cleanup			
+		TahoeSyncWorker.CompleteSync(executor, inodeId)
+
+
+	# Get the Inode we'll be syncing.
+	@staticmethod
+	def GetInode(executor, inodeId):
+		try:
+			inode = Inode.Create(executor, inodeId)
+			logging.info(f"Inode {inode.name} (ID: {inodeId}) ready to sync.")
+		except Exception as e:
+			logging.error(f"Error syncing {inodeId}: {e}")
+			raise e
+		return inode
+
+
+	# Perform the upstream Sync.
+	# Update some data in the source (i.e. Tahoe).
+	@staticmethod
+	def PushUpstreamToSource(executor, inode):
+		try:
+			inode.BeforePushUpstream()
+			inode.PushUpstream()
+			inode.AfterPushUpstream()
+			logging.info(f"Inode {inode.name} (ID: {inode.id}) pushed upstream.")
+		except Exception as e:
+			logging.error(f"Error syncing {inodeId}: {e}")
+			raise e
+
+	# Perform the downstream Sync.
+	# Update some data in the local cache.
+	@staticmethod
+	def PullDownstreamFromSource(executor, inode):
+		try:
+			inode.BeforePullDownstream()
+			inode.PullDownstream()
+			inode.AfterPullDownstream()
+			logging.info(f"Inode {inode.name} (ID: {inode.id}) pulled downstream.")
+		except Exception as e:
+			logging.error(f"Error syncing {inodeId}: {e}")
+			raise e
+
+
+	# Release databse locks
+	@staticmethod
+	def CompleteSync(executor, inode, successful=True):
+		inode.SetEphemeral('sync_pid', "", os.getpid()
+		inode.SetEphemeral('sync_host', "", socket.gethostname())
+		success = "successful" if successful else "unsuccessful"
+		logging.info(f"Inode {obj.name} (ID: {inodeId}) sync {success}.")
+DONE WITH ./lib/tahoe/TahoeSyncWorker.py
+./lib/RiverDelta.py
+import eons
+import logging
+import sqlalchemy
+import redis
+
+# The River Delta tracks what has been changed on the local / cache filesystem compared to the remote.
+# It is backed by a remote database for persistence and scalability.
+# NOTE: This class assumes that it is the authority on what the remote state should be.
+#   If there are changes on the remote, this class WILL NOT resolve the conflict & the behavior of the resulting filesystem will be undefined.
+#   Likely, *this will simply clobber the remote changes.
+#
+# RiverFS uses 3 distinct processes to manage concurrent inode operations: Reads, Writes, and Syncs.
+# Reading and writing these semaphores needs to be fast, so we use Redis, instead of mysql.
+# To query one of these semaphores, use GetState(), below.
+# To set one of these semaphores, use SetState(), below.
+#
+class RiverDelta(eons.Functor):
+	def __init__(this, name="River Delta"):
+		super().__init__(name)
+
+		this.arg.kw.required.append("sql_host")
+		this.arg.kw.required.append("sql_db")
+		this.arg.kw.required.append("sql_user")
+		this.arg.kw.required.append("sql_pass")
+
+		this.arg.kw.required.append("redis_host")
+		
+		this.arg.kw.optional["sql_engine"] = "mysql"
+		this.arg.kw.optional["sql_port"] = 3306
+		this.arg.kw.optional["sql_ssl"] = False
+
+		this.arg.kw.optional["redis_port"] = 6379
+		this.arg.kw.optional["redis_db"] = 0
+		this.arg.kw.optional["redis_semaphore_timeout"] = 1800 # Timeout for semaphore locks (seconds). Should only be used if a server crashed, etc.
+
+		this.sql = None
+		this.redis = None
+
+	def Function(this):
+		this.sql = sqlalchemy.create_engine(f"{this.sql_engine}://{this.sql_user}:{this.sql_pass}@{this.sql_host}:{this.sql_port}/{this.sql_db}?ssl={this.sql_ssl}")
+		this.redis = redis.Redis(host=this.redis_host, port=this.redis_port, db=this.redis_db)
+		
+	
+	# Get the state of a process on an inode.
+	# RETURNS the state for the given process on the given inode or None if there was an error.
+	def GetState(this, inode, process):
+		try:
+			return ProcessState(int(this.GetRedisInodeValue(inode, process)))
+		except Exception as e:
+			logging.error(f"Error getting state for {inode}:{process}: {e}")
+			return None
+
+	# Set the state of a process on an inode.
+	# For extra safety, you can pass in what you think the current state is. If it's not what you expect, the state will not be set.
+	def SetState(this, inode, process, state, expectedState=None):
+		stateValue = str(state.value)  # Store the enum value as a string
+		expectedStateValue = str(expectedState.value) if expectedState is not None else None
+		return this.SetRedisInodeValue(inode, process, stateValue, expectedStateValue)
+
+
+	# Get a value for a key on an inode in Redis.
+	# If you need to coerce the value to a specific type, pass in the type as coerceType.
+	# RETURNS the value for the given key on the given inode or None if there was an error.
+	def GetRedisInodeValue(this, inode, key, coerceType=None):
+		try:
+			ret = this.redis.get(f"{inode}:{key}")
+			if (coerceType is not None):
+				ret = coerceType(ret)
+		except Exception as e:
+			logging.error(f"Error getting value for {inode}:{key}: {e}")
+			return None
+
+	# Set a value for a key on an inode in Redis.
+	# For extra safety, you can pass in what you think the current value is. If it's not what you expect, the value will not be set.
+	# For example, if a long time has passed between when you last checked the value and when you set it, you can use the return value of this method let you know if you need to recheck your data.
+	# RETURNS True if the value was set, False otherwise.
+	def SetRedisInodeValue(this, inode, key, value, expectedValue=None):
+		ret = False
+
+		if (expectedValue is not None):
+			lua = """\
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+	result = redis.call('SET', KEYS[1], ARGV[2])
+	if (result == 'OK') then
+		redis.call('PEXPIRE', KEYS[1], ARGV[3])
+		return 1
+	end
+else
+	return 0
+end
+"""
+			try:
+				result = this.redis.eval(lua, 1, f"{inode}:{key}", expectedValue, value, this.redis_semaphore_timeout * 1000)
+				ret = result == 1 and this.GetRedisInodeValue(inode, key) == value
+			except Exception as e:
+				logging.error(f"Error setting value for {inode}:{key} to {value}: {e}")
+				ret = False
+
+		else:
+			try:
+				this.redis.set(f"{inode}:{key}", value, ex=this.redis_semaphore_timeout)
+				ret = this.GetRedisInodeValue(inode, key) == value
+			except Exception as e:
+				logging.error(f"Error setting value for {inode}:{key} to {value}: {e}")
+				ret = False
+
+		return retDONE WITH ./lib/RiverDelta.py
+./lib/Upath.py
+import os
+
+class UniversalPath:
+	def __init__(this, path=""):
+		if (isinstance(path, UniversalPath)):
+			this.upath = path.upath
+		elif (isinstance(path, str)):
+			this.FromPath(path)
+
+	def __str__(this):
+		return this.upath
+
+	def FromPath(this, path):
+		assert isinstance(path, str)
+		try:
+			path = os.path.normpath(path)
+			this.upath = path.replace(os.sep, "/").lstrip('/')
+		except UnicodeError:
+			raise IOError(errno.ENOENT, "file does not exist")
+
+	def AsPath(this):
+		return this.upath.replace(os.sep, "/")
+
+	def GetParent(this):
+		return upath(os.path.dirname(this.upath))
+
+	# Compatibility for str method.
+	def encode(this, encoding='utf-8'):
+		return this.upath.encode(encoding)DONE WITH ./lib/Upath.py
+./lib/db/InodeModel.py
+import sqlalchemy as sql
+import sqlalchemy.orm as orm
+
+# Inodes store the usable metadata for files and directories.
+# Each has an id that is the primary key and path-idependent means of access. The id makes it possible to rename the object without having to change the upath of children. Essentially the id is a mock inode number.
+class InodeModel(orm.declarative_base()):
+	__tablename__ = 'fs'
+
+	# Lookup info.
+	id = sql.Column(sql.Integer, primary_key=True)
+	name = sql.Column(sql.String, nullable=False)
+	kind = sql.Column(sql.String, nullable=False) # Python class name for re-creating the right Inode subclass.
+
+	# Filesystem data.
+	meta = Column(sql.JSON) # For storing metadata, e.g. xattrs
+	last_accessed = sql.Column(sql.Integer, default=0) # Access time is used in caching, so stored separately / doubly from `meta`.
+	parents = Column(sql.JSON)
+	children = Column(sql.JSON) # Only for directories
+	data = Column(sql.String) # Only for files. Path to file on disk, not actual file data.
+
+	def __repr__(this):
+		return f"<{this.name} ({this.id}) @ {this.upath}>"
+
+	def __init__(this):
+		passDONE WITH ./lib/db/InodeModel.py
+./lib/fs/Directory.py
+import eons
+from .Inode import *
+
+class Directory (Inode):
+	def __init__(this, upath="", name="Directory"):
+		super().__init__(name, upath)
+
+		this.children = [] # List of numeric ids of all the children of *this.
+	
+		this.PopulateFSMethods('Directory', [
+			'GetInode',
+			'GetAttributes',
+			'Unlink',
+			'Open',
+			'Close',
+			'Make'
+		])
+
+	def GetDataToSave(this):
+		ret = super().GetDataToSave()
+		ret.update({
+			'children': this.children
+		})
+		return ret
+	
+	def LoadFromData(this, data):
+		super().LoadFromData(data)
+		this.children = data['children']
+
+	# No special action is needed to freeze a directory.
+	def Freeze(this):
+		return super().Freeze()
+
+
+	def BeforePushUpstream(this):
+		pass
+
+	def PushUpstream(this):
+		pass
+
+	def AfterPushUpstream(this):
+		pass
+
+	
+	def BeforePullDownstream(this):
+		pass
+	
+	def PullDownstream(this):
+		pass
+	
+	def AfterPullDownstream(this):
+		passDONE WITH ./lib/fs/Directory.py
+./lib/fs/File.py
+import eons
+from .Inode import *
+
+class File (Inode):
+	def __init__(this, upath="", name="File"):
+		super().__init__(name, upath)
+
+		this.data = None # The filesystem path to the data of the file.
+	
+		this.PopulateFSMethods('File', [
+			'GetAttributes',
+			'Unlink',
+			'Read',
+			'Write',
+			'Truncate',
+			'Append',
+			'Copy',
+			'Move'
+		])
+
+	def GetDataToSave(this):
+		ret = super().GetDataToSave()
+		ret.update({
+			'data': this.data
+		})
+		return ret
+
+	def LoadFromData(this, data):
+		super().LoadFromData(data)
+		this.data = data['data']
+
+	def Freeze(this):
+		# Copy the file data to a temporary file.
+		# Wait for any writes to finish first.
+	
+
+	def BeforePushUpstream(this):
+		pass
+
+	def PushUpstream(this):
+		pass
+
+	def AfterPushUpstream(this):
+		pass
+
+
+	def BeforePullDownstream(this):
+		pass
+	
+	def PullDownstream(this):
+		pass
+	
+	def AfterPullDownstream(this):
+		passDONE WITH ./lib/fs/File.py
+./lib/fs/common/FSOp.py
+import eons
+
+# An FSOp, or File System Operation, is a Functor which performs a single operation on a file system.
+# For example, opening a file, reading from a file, writing to a file, etc.
+# FSOp is a base class for all file system operations.
+# All FSOps should be:
+# - Stateless: They should not store any state, and should not have any in-memory side effects.
+# - Asynchronous: They will be given their own thread to run in and should return a Future.
+# - Scalable: Multiple FSOps should be able to run in parallel without interfering with each other.
+#
+# All state storage and locking capabilities will be provided by the governing RiverFS Executor.
+class FSOp(eons.Functor):
+	def __init__(this, name=eons.INVALID_NAME()):
+		super().__init__(name)
+DONE WITH ./lib/fs/common/FSOp.py
+./lib/fs/common/ProcessStates.py
+from enum import Enum
+
+# Processes are some possible conflicting file operations. RiverFS uses 3 distinct processes to manage concurrent inode operations: Reads, Writes, and Syncs.
+# Each process has a state, which can be one of the following:
+class ProcessState(Enum):
+    ERROR = 0
+    PENDING = 1
+    RUNNING = 2
+    COMPLETE = 3
+    IDLE = 4
+
+    def __str__(self):
+        return self.nameDONE WITH ./lib/fs/common/ProcessStates.py
+./lib/fs/common/Inode.py
+import eons
+import threading
+import multiprocessing
+import json
+import logging
+from datetime import datetime
+from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import NoResultFound
+# from truckeefs.lib.db.InodeModel import InodeModel #implicit per build system.
+
+class Inode (eons.Functor):
+	def __init__(this, upath=None, name="UNKNOWN FILESYSTEM OBJECT"):
+		super().__init__(name)
+
+		this.id = None
+		this.meta = None # Metadata for the object
+		this.upaths = []
+		this.parents = [] # numeric ids of parents
+		if (upath and type(upath) is str):
+			this.upaths.append(upath)
+
+		this.arg.kw.required.append('db')
+
+		this.stateRetries = 15 # Number of times to retry a state check. Uses ExponentialSleep between tries.
+
+		# Temporary Sync operational members.
+		# Do not modify these directly.
+		this.frozen = None # Data to be synced to Tahoe as JSON. Do not modify directly.
+		this.sync_again = False # Whether to sync this object again.
+		this.lastRead = None # Last time the object was read.
+
+
+	# Get the state of a process on an inode.
+	# Use this method for semaphore operations.
+	# Processes include 'read', 'write', and 'sync'.
+	def GetState(this, process):
+		return this.executor.delta.GetState(this.id, process)
+
+	# Get the state of a process on an inode.
+	# Use this method for semaphore operations.
+	# Processes include 'read', 'write', and 'sync'.
+	# For extra safety, you can pass in what you think the current state is. If it's not what you expect, the state will not be set.
+	# RETURNS True if the state has been set. False otherwise.
+	def SetState(this, process, state, expectedState=None):
+		return this.executor.delta.SetState(this.id, process, state)
+
+	# Wait for a process to reach a certain state.
+	def WaitForState(this, process, state):
+		for i in range(this.stateRetries):
+			if (this.GetState(process) == state):
+				return True
+
+			ExponentialSleep(i)
+
+		return False
+	
+	# Wait for a process to reach a state besides the one provided.
+	# RETURNS the new state if it changes. False otherwise.
+	def WaitForStateBesides(this, process, state):
+		for i in range(this.stateRetries):
+			newState = this.GetState(process)
+			if (newState != state):
+				return newState
+
+			ExponentialSleep(i)
+
+		return False
+
+	# Wait for a process to change state.
+	# RETURNS the new state if it changes. False otherwise.
+	def WaitForStateChange(this, process):
+		return this.WaitForStateBesides(process, this.GetState(process))
+
+	# Check if the process states for this inode have been initialized.
+	# RETURNS True if the states have been initialized. False otherwise.
+	def AreProcessStatesInitialized(this):
+		readState = this.GetState('read')
+		writeState = this.GetState('write')
+		syncState = this.GetState('sync')
+
+		# If any one state is None, there might just be a network error (though we hope not!)
+		# If all states are None, the object should be initialized.
+		if (readState is None and writeState is None and syncState is None):
+			return False
+		
+		return True
+
+	# Initialize the process states for this inode.
+	def InitializeProcessStates(this):
+		this.SetState('read', ProcessState.IDLE)
+		this.SetState('write', ProcessState.IDLE)
+		this.SetState('sync', ProcessState.IDLE)
+
+
+	# Get a value for a key on an Inode in Redis.
+	# If you need to coerce the value to a specific type, pass in the type as coerceType.
+	# RETURNS the value, as a string, for the given key on the given Inode or None if there was an error.
+	def GetEphemeral(this, key, coerceType=None):
+		return this.executor.delta.GetRedisInodeValue(this.id, key, coerceType)
+
+	# Set a value for a key on an Inode in Redis.
+	# RETURNS True if the value was set, False otherwise.
+	# Use the expectedValue parameter for extra safety. If the value is not what you expect, the value will not be set.
+	def SetEphemeral(this, key, value, expectedValue=None):
+		return this.executor.delta.SetRedisInodeValue(this.id, key, value, expectedValue)
+
+	# Set any temporary values to their default values.
+	# NOTE: These are less structerd than the process states, so there's no Are...Initialized methods.
+	# Because of that, this method should be called wherever InitializeProcessStates is called.
+	def InitializeEphemerals(this):
+		this.SetEphemeral('sync_pid', "")
+		this.SetEphemeral('sync_host', "")
+		this.SetEphemeral('sync_again', False)
+		this.SetEphemeral('last_written', "")
+
+
+	# Factory method to create a new Inode from a given upath
+	# This method will simultaneously check:
+	# 1. If the object is already in the Executor's cache
+	# 2. If the object is in the database
+	# 3. If the object is in the TahoeLAFS authority
+	# If the object is not in the cache, it will be created and added to the cache.
+	# If the object is not in the database, it will be created and added to the database.
+	# The same applies for any missing parents in the given upath which are not already in the database.
+	# Missing parents will not be cached.
+	@classmethod
+	def From(cls, executor, upath):
+
+		# Define thread variables
+		existingByUpathResult = [None]
+		existingByIdResult = [None]
+		idResult = [None]
+		authorityResult = [None]
+
+		# Define thread events
+		authorityHaltEvent = threading.Event()
+		idHaltEvent = threading.Event()
+
+		# Define thread functions
+		def GetCachedObjectByUpathThread():
+			existingByUpathResult[0] = executor.GetCachedObjectByUpath(upath)
+
+		def GetCachedObjectByIdThread():
+			existingByIdResult[0] = executor.GetCachedObjectById(idResult[0])
+
+		def GetIdThread():
+			idResult[0] = cls.GetId(executor, upath, idHaltEvent)
+
+		def AuthorityCheckThread():
+			authorityResult[0] = cls.GetPathInfoFromAuthority(executor, upath, authorityHaltEvent)
+
+		# Create and start threads
+		cachedUpathThread = threading.Thread(target=GetCachedObjectByUpathThread, name=f"GetCachedObjectByUpathThread for {upath}")
+		dbThread = threading.Thread(target=getIdThread, name=f"GetIdThread for {upath}")
+		authorityThread = threading.Thread(target=authorityCheckThread, name=f"AuthorityCheckThread for {upath}")
+
+		cachedUpathThread.start()
+		dbThread.start()
+		authorityThread.start()
+
+		# Wait for the DB lookup to finish
+		cachedUpathThread.join()
+
+		# Check if the object is already in the cache
+		if (existingByUpathResult[0]):
+			# Signal the db thread to terminate
+			if (dbThread.is_alive()):
+				logging.info("Cache lookup succeeded; terminating database lookup.")
+				idHaltEvent.set()
+
+			return existingByUpathResult[0]
+
+		# Wait for the DB lookup to finish
+		dbThread.join()
+
+		if (idResult[0]):
+			cachedIdThread = threading.Thread(target=GetCachedObjectByIdThread, name=f"GetCachedObjectByIdThread for {idResult[0]}")
+			cachedIdThread.start()
+
+			# If DB lookup succeeded, terminate authority thread if still running
+			if (authorityThread.is_alive()):
+				logging.info("Database lookup succeeded; terminating authority lookup.")
+				authorityHaltEvent.set() # NOTE: at time of writing, this is a nop.
+
+			# Check if the object is already in the cache
+			cachedIdThread.join()
+			if (existingByIdResult[0]):
+				existingByIdResult[0].AddUpath(upath)
+				return existingByIdResult[0]
+
+		else:
+			# Wait for authority thread to finish if DB lookup failed
+			authorityThread.join()
+
+			if (authorityResult[0]):
+				# If authority lookup succeeded but DB lookup failed
+				idResult[0] = cls.UpdateDatabaseWithPath(executor, upath, authorityResult[0])
+			else:
+				raise ValueError(f"Path {upath} is invalid and could not be found in TahoeLAFS")
+
+		# If we reach this point, the object is not in the cache and we need to create a new one
+		ret = cls(upath)
+		ret.id = idResult[0]
+		executor.CacheObject(ret)
+		return ret
+
+
+	@classmethod
+	def GetId(cls, executor, upath, haltEvent=None):
+		def RecursiveResolve(pathSegments, parent):
+			if (haltEvent and haltEvent.is_set()):
+				return None
+
+			# Base case: no more segments left to resolve
+			if not pathSegments:
+				return parent
+
+			segment = pathSegments.pop(0)
+			resolvedIds = []
+			session: Session = executor.GetDatabaseSession()
+
+			try:
+				obj = session.query(InodeModel).filter_by(name=segment).filter(InodeModel.parents.contains([parent])).one()
+				resolvedIds.extend(RecursiveResolve(pathSegments, [obj.id]))
+			except NoResultFound:
+				pass
+
+			if not resolvedIds:
+				raise ValueError(f"Inode not found for segment '{segment}' under parent {parent}")
+
+			return resolvedIds
+
+		pathSegments = upath.strip('/').split('/')
+		initialParent = executor.GetUpathRootId()
+
+		# Resolve ID directly, without threading
+		try:
+			return RecursiveResolve(pathSegments, initialParent)[-1]
+		except ValueError as e:
+			logging.error(f"Error resolving path {upath}: {e}")
+			return None
+
+
+	@classmethod
+	def UpdateDatabaseWithPath(cls, executor, upath, pathInfo):
+		session: Session = executor.GetDatabaseSession()
+
+		# Split the upath into its segments
+		pathSegments = upath.strip('/').split('/')
+
+		# Base case: If there are no more segments to process, return
+		if (not pathSegments):
+			return None
+
+		# Process the parent path first (all segments except the last one)
+		parentPath = '/'.join(pathSegments[:-1])
+		parentId = None
+
+		if (parentPath):
+			# Check if the parent already exists in the database
+			parentId = cls.GetId(executor, parentPath)
+			if (not parentId):
+				# Recursively create the parent path if it doesn't exist
+				parentInfo = cls.GetPathInfoFromAuthority(executor, parentPath)
+				if (parentInfo):
+					parentId = cls.UpdateDatabaseWithPath(executor, parentPath, parentInfo)
+				else:
+					raise ValueError(f"Parent path {parentPath} is invalid and could not be found in TahoeLAFS")
+
+		# Create the current InodeModel entry using the resolved parent ID
+		newObj = InodeModel(
+			name=pathSegments[-1], 
+			parents=[parentId] if parentId else None
+		)
+		session.add(newObj)
+		session.commit()
+
+		return newObj.id
+
+	@classmethod
+	def GetPathInfoFromAuthority(cls, executor, upath, haltEvent=None):
+		# TODO: implement the haltEvent somehow? It should just be a kill signal but Python doesn't support that.
+		return executor.GetSourceConnection().GetPathInfo(upath)
+
+
+	# Populate the Inode with the methods that are available to it.
+	# This allows us to utilize the FSOp class to perform operations on the object.
+	def PopulateFSMethods(this, name, fsMethods):
+		for method in fsMethods:
+			this.methods[method] = eons.SelfRegistering(f"{name.lower()}_{method.lower()}")(name=method)
+
+
+	# Validate the arguments provided to the object.
+	# eons.Functor method. See that class for more information.
+	def ValidateArgs(this):
+		super().ValidateArgs()
+
+		if (not this.id):
+			if (not len(this.upaths)):
+				raise eons.MissingArgumentError(f"No upath provided for Inode {this.name}")
+
+
+	# Add a new upath to *this.
+	def AddUpath(this, upath):
+		this.upaths.append(upath)
+
+
+	# Check if the object is still fresh in the cache
+	def IsFresh(this):
+		return this.pendingSync or (this.last_accessed > datetime.now().timestamp() - this.executor.cache_ttl)
+	
+
+	# RETURNS a dictionary of the data that should be saved to the database.
+	# You should override this method in your child class to save additional data.
+	def GetDataToSave(this):
+		return {
+			name: this.name,
+			kind: this.__class__.__name__,
+			parents: this.parents,
+			meta: this.meta,
+		}
+
+	# Load the data from the database into *this.
+	# You should override this method in your child class to load additional data.
+	def LoadFromData(this, data):
+		this.name = data['name']
+		this.parents = json.loads(data['parents'])
+		this.meta = data['meta']
+
+	
+	# Save the state of *this.
+	# RETURNS a dictionary of the data that should be saved to the database and/or Tahoe.
+	# You should override this method in your child class to save additional data.
+	# Will only be called when *this has been mutated, before being Saved.
+	def Freeze(this):
+		this.frozen = this.GetDataToSave()
+		return this.frozen
+
+
+	# Commit the data in *this to the database.
+	# You should NOT need to override this method.
+	# To change the data that are saved, override GetDataToSave instead.
+	#
+	# The mutated parameter is used to determine if the object needs to be updated in Tahoe.
+	# If *this is mutated, it will be marked as pending_sync in the database, and a new process will be spawned to sync the object to Tahoe.
+	def Save(this, mutated=True):
+		session: Session = this.executor.GetDatabaseSession()
+
+		try:
+			# Check if the object already exists in the database
+			obj = session.query(InodeModel).filter_by(id=this.id).one()
+
+			# Update the existing object's fields
+			for key, value in this.GetDataToSave().items():
+				setattr(obj, key, value)
+
+			if (mutated):
+				# Check if there's an active sync process
+				syncPid = this.GetEphemeral('sync_pid')
+				syncHost = this.GetEphemeral('sync_host')
+				if (syncPid and syncHost):
+					# Verify that the process is still running
+					try:
+						if (socket.gethostname() == syncHost):
+							os.kill(int(syncPid), 0)
+							logging.info(f"Sync process already running for Inode {this.name} (PID: {syncPid}).")
+
+							this.SetEphemeral('sync_again', True)
+
+					except OSError:
+						# Process not running, clear the PID
+						syncPid = None
+						syncHost = None
+
+					# TODO: Handle cases where the data needs to be synced but the sync_host is not the current host
+					# For example, what happens in a multi-server environment where a sync_host goes down? How would we even know?
+
+				if (not syncPid):
+					# Collect sync args
+					kwargs = this.executor.kwargs.copy()
+					frozenData = this.Freeze()
+					kwargs.update({
+						'inode_id': this.id,
+						'frozen_data': frozenData,
+					})
+
+					# Spawn a new sync process
+					# This new process will wait for us to put the sync_pid in the database before beginning it's work.
+					sync_process = multiprocessing.Process(target=TahoeSyncWorker.UpstreamSyncWorker, args=(kwargs,))
+					sync_process.start()
+
+					# Save the PID and hostname in the Redis database
+					obj.SetEphemeral('sync_pid', sync_process.pid, expectedValue="")
+					obj.SetEphemeral('sync_host', socket.gethostname(), expectedValue="")
+
+			session.commit()
+			logging.info(f"Inode {this.name} (ID: {this.id}) updated in the database.")
+
+		except NoResultFound:
+			logging.error(f"Inode with ID {this.id} not found in the database.")
+			raise ValueError(f"Inode with ID {this.id} does not exist in the database.")
+
+
+	# Load the data from the database into *this.
+	# You should NOT need to override this method.
+	# To change the data that are loaded, override LoadFromData instead.
+	def Load(this):
+		session: Session = this.executor.GetDatabaseSession()
+
+		try:
+			# Load the object from the database using its ID
+			obj = session.query(InodeModel).filter_by(id=this.id).one()
+
+			# Populate the object's attributes with the loaded data
+			this.LoadFromData(obj)
+
+			logging.info(f"Inode {this.name} (ID: {this.id}) loaded from the database.")
+
+		except NoResultFound:
+			logging.error(f"Inode with ID {this.id} not found in the database.")
+			raise ValueError(f"Inode with ID {this.id} does not exist in the database.")
+
+
+	# Create a new Inode from the database using the given ID.
+	# Will use the class name stored in the database to instantiate the appropriate type.
+	@staticmethod
+	def Create(executor, id):
+		session: Session = this.executor.GetDatabaseSession()
+
+		try:
+			# Load the object from the database using its ID
+			obj = session.query(InodeModel).filter_by(id=id).one()
+
+			# Create the object
+			ret = eons.SelfRegistering(obj.kind)()
+			ret.executor = executor
+			ret.id = obj.id
+			ret.LoadFromData(obj)
+
+			return ret
+
+		except NoResultFound:
+			logging.error(f"Inode with ID {id} not found in the database.")
+			raise ValueError(f"Inode with ID {id} does not exist in the database.")
+
+
+	# Anything you'd like to do before *this is synced to Tahoe.
+	# Will be called by TahoeSyncWorker.PushUpstreamToSource.
+	# Should ONLY operate on this.frozen data
+	def BeforePushUpstream(this):
+		pass
+
+	# Update some data in the source (i.e. Tahoe).
+	# Please override for your child class.
+	# Will be called by TahoeSyncWorker.PushUpstreamToSource.
+	# Should ONLY operate on this.frozen data
+	def PushUpstream(this):
+		pass
+
+	# Anything you'd like to do after *this is synced to Tahoe.
+	# Will be called by TahoeSyncWorker.PushUpstreamToSource.
+	# Should ONLY operate on this.frozen data
+	def AfterPushUpstream(this):
+		pass
+
+	
+	# Anything you'd like to do before *this is synced from Tahoe.
+	# Will be called by TahoeSyncWorker.PullDownstreamFromSource.
+	def BeforePullDownstream(this):
+		pass
+	
+	# Update our local cache with data from Tahoe.
+	# Please override for your child class.	
+	# Will be called by TahoeSyncWorker.PullDownstreamFromSource.
+	def PullDownstream(this):
+		pass
+	
+	# Anything you'd like to do after *this is synced from Tahoe.
+	# Will be called by TahoeSyncWorker.PullDownstreamFromSource.
+	def AfterPullDownstream(this):
+		passDONE WITH ./lib/fs/common/Inode.py
+./lib/fs/fsop/common/GetAttributes.py
+
+@eons.kind(FSOp)
+def FSOpGetAttr(this, upath, io):
+	if upath == '':
+		dir = this.open_dir(upath, io)
+		try:
+			info = dir.get_attr()
+		finally:
+			this.close_dir(dir)
+	else:
+		upath_parent = udirname(upath)
+		dir = this.open_dir(upath_parent, io)
+		try:
+			info = dir.get_child_attr(ubasename(upath))
+		except IOError as err:
+			if err.errno == errno.ENOENT and upath in this.open_items:
+				# New file that has not yet been uploaded
+				info = dict(this.open_items[upath].get_attr())
+				if 'mtime' not in info:
+					info['mtime'] = time.time()
+				if 'ctime' not in info:
+					info['ctime'] = time.time()
+			else:
+				raise
+		finally:
+			this.close_dir(dir)
+
+	if upath in this.open_items:
+		info.update(this.open_items[upath].get_attr())
+		if 'mtime' not in info:
+			info['mtime'] = time.time()
+		if 'ctime' not in info:
+			info['ctime'] = time.time()
+
+	return infoDONE WITH ./lib/fs/fsop/common/GetAttributes.py
+./lib/fs/fsop/common/Unlink.py
+
+@eons.kind(FSOp)
+def FSOpUnlink(this, upath, io, is_dir=False):
+	if upath == '':
+		raise IOError(errno.EACCES, "cannot unlink root directory")
+
+	# Unlink in cache
+	if is_dir:
+		f = this.open_dir(upath, io, lifetime=this.write_lifetime)
+	else:
+		f = this.open_file(upath, io, 0, lifetime=this.write_lifetime)
+	try:
+		f.inode.unlink()
+	finally:
+		if is_dir:
+			this.close_dir(f)
+		else:
+			this.close_file(f)
+
+	# Perform unlink
+	parent = this.open_dir(udirname(upath), io, lifetime=this.write_lifetime)
+	try:
+		parent_cap = parent.inode.info[1]['rw_uri']
+
+		upath_cap = parent_cap + '/' + ubasename(upath)
+		try:
+			cap = io.delete(upath_cap, iscap=True)
+		except (HTTPError, IOError) as err:
+			if isinstance(err, HTTPError) and err.code == 404:
+				raise IOError(errno.ENOENT, "no such file")
+			raise IOError(errno.EREMOTEIO, "failed to retrieve information")
+
+		# Remove from cache
+		parent.inode.cache_remove_child(ubasename(upath))
+	finally:
+		this.close_dir(parent)DONE WITH ./lib/fs/fsop/common/Unlink.py
+./lib/fs/fsop/file/Upload.py
+
+@eons.kind(FSOp)
+def file_upload(this, c, io):
+	if isinstance(c, CachedFileHandle):
+		c = c.inode
+
+	if c.upath is not None and c.dirty:
+		parent = this.open_dir(udirname(c.upath), io, lifetime=this.write_lifetime)
+		try:
+			parent_cap = parent.inode.info[1]['rw_uri']
+
+			# Upload
+			try:
+				cap = c.upload(io, parent_cap=parent_cap)
+			except:
+				# Failure to upload --- need to invalidate parent
+				# directory, since the file might not have been
+				# created.
+				this.invalidate(parent.upath, shallow=True)
+				raise
+
+			# Add in cache
+			parent.inode.cache_add_child(ubasename(c.upath), cap, size=c.get_size())
+		finally:
+			this.close_dir(parent)DONE WITH ./lib/fs/fsop/file/Upload.py
+./lib/fs/fsop/file/GetInode.py
+
+@eons.kind(FSOp)
+def file_getinode(this, upath, io, excl=False, creat=False, lifetime=None):
+	if lifetime is None:
+		lifetime = this.read_lifetime
+
+	f = this.open_items.get(upath)
+
+	if f is not None and not f.is_fresh(lifetime):
+		f = None
+		this.invalidate(upath, shallow=True)
+
+	if f is None:
+		try:
+			cap = this.LookupCap(upath, io, lifetime=lifetime)
+		except IOError as err:
+			if err.errno == errno.ENOENT and creat:
+				cap = None
+			else:
+				raise
+
+		if excl and cap is not None:
+			raise IOError(errno.EEXIST, "file already exists")
+		if not creat and cap is None:
+			raise IOError(errno.ENOENT, "file does not exist")
+
+		f = CachedFileInode(
+			this,
+			upath,
+			io,
+			filecap=cap, 
+			persistent=this.cache_data
+		)
+		this.open_items[upath] = f
+
+		if cap is None:
+			# new file: add to parent inode
+			d = this.open_dir(udirname(upath), io, lifetime=lifetime)
+			try:
+				d.inode.cache_add_child(ubasename(upath), None, size=0)
+			finally:
+				this.close_dir(d)
+		return f
+	else:
+		if excl:
+			raise IOError(errno.EEXIST, "file already exists")
+		if not isinstance(f, CachedFileInode):
+			raise IOError(errno.EISDIR, "item is a directory")
+		return fDONE WITH ./lib/fs/fsop/file/GetInode.py
+./lib/fs/fsop/file/Open.py
+
+@eons.kind(FSOp)
+def file_open(this, upath, io, flags, lifetime=None):
+	writeable = (flags & (os.O_RDONLY | os.O_RDWR | os.O_WRONLY)) in (os.O_RDWR, os.O_WRONLY)
+	if writeable:
+		# Drop file data cache before opening in write mode
+		if upath not in this.open_items:
+			this.invalidate(upath)
+
+		# Limit e.g. parent directory lookup lifetime
+		if lifetime is None:
+			lifetime = this.write_lifetime
+
+	f = this.get_file_inode(
+		upath,
+		io,
+		excl=(flags & os.O_EXCL),
+		creat=(flags & os.O_CREAT),
+		lifetime=lifetime
+	)
+	return CachedFileHandle(upath, f, flags)DONE WITH ./lib/fs/fsop/file/Open.py
+./lib/fs/fsop/file/Close.py
+
+@eons.kind(FSOp)
+def file_close(this, f):
+	c = f.inode
+	upath = f.upath
+	f.close()
+	if c.closed:
+		if upath in this.open_items:
+			del this.open_items[upath]
+		this._restrict_size()DONE WITH ./lib/fs/fsop/file/Close.py
+./lib/fs/fsop/file/Unlink.py
+
+@eons.kind(FSOpUnlink)
+def file_unlink(this, upath, io, is_dir=False):
+	if upath == '':
+		raise IOError(errno.EACCES, "cannot unlink root directory")
+
+	# Unlink in cache
+	if is_dir:
+		f = this.open_dir(upath, io, lifetime=this.write_lifetime)
+	else:
+		f = this.open_file(upath, io, 0, lifetime=this.write_lifetime)
+	try:
+		f.inode.unlink()
+	finally:
+		if is_dir:
+			this.close_dir(f)
+		else:
+			this.close_file(f)
+
+	# Perform unlink
+	parent = this.open_dir(udirname(upath), io, lifetime=this.write_lifetime)
+	try:
+		parent_cap = parent.inode.info[1]['rw_uri']
+
+		upath_cap = parent_cap + '/' + ubasename(upath)
+		try:
+			cap = io.delete(upath_cap, iscap=True)
+		except (HTTPError, IOError) as err:
+			if isinstance(err, HTTPError) and err.code == 404:
+				raise IOError(errno.ENOENT, "no such file")
+			raise IOError(errno.EREMOTEIO, "failed to retrieve information")
+
+		# Remove from cache
+		parent.inode.cache_remove_child(ubasename(upath))
+	finally:
+		this.close_dir(parent)DONE WITH ./lib/fs/fsop/file/Unlink.py
+./lib/fs/fsop/file/GetAttributes.py
+
+@eons.kind(FSOpGetAttr)
+def file_getattributes(this, upath, io):
+	if upath == '':
+		dir = this.open_dir(upath, io)
+		try:
+			info = dir.get_attr()
+		finally:
+			this.close_dir(dir)
+	else:
+		upath_parent = udirname(upath)
+		dir = this.open_dir(upath_parent, io)
+		try:
+			info = dir.get_child_attr(ubasename(upath))
+		except IOError as err:
+			if err.errno == errno.ENOENT and upath in this.open_items:
+				# New file that has not yet been uploaded
+				info = dict(this.open_items[upath].get_attr())
+				if 'mtime' not in info:
+					info['mtime'] = time.time()
+				if 'ctime' not in info:
+					info['ctime'] = time.time()
+			else:
+				raise
+		finally:
+			this.close_dir(dir)
+
+	if upath in this.open_items:
+		info.update(this.open_items[upath].get_attr())
+		if 'mtime' not in info:
+			info['mtime'] = time.time()
+		if 'ctime' not in info:
+			info['ctime'] = time.time()
+
+	return infoDONE WITH ./lib/fs/fsop/file/GetAttributes.py
+./lib/fs/fsop/dir/Make.py
+
+@eons.kind(FSOp)
+def directory_make(this, upath, io):
+	if upath == '':
+		raise IOError(errno.EEXIST, "cannot re-mkdir root directory")
+
+	# Check that parent exists
+	parent = this.open_dir(udirname(upath), io, lifetime=this.write_lifetime)
+	try:
+		parent_cap = parent.inode.info[1]['rw_uri']
+
+		# Check that the target does not exist
+		try:
+			parent.get_child_attr(ubasename(upath))
+		except IOError as err:
+			if err.errno == errno.ENOENT:
+				pass
+			else:
+				raise
+		else:
+			raise IOError(errno.EEXIST, "directory already exists")
+
+		# Invalidate cache
+		this.invalidate(upath)
+
+		# Perform operation
+		upath_cap = parent_cap + '/' + ubasename(upath)
+		try:
+			cap = io.mkdir(upath_cap, iscap=True)
+		except (HTTPError, IOError) as err:
+			raise IOError(errno.EREMOTEIO, "remote operation failed: {0}".format(err))
+
+		# Add in cache
+		parent.inode.cache_add_child(ubasename(upath), cap, size=None)
+	finally:
+		this.close_dir(parent)DONE WITH ./lib/fs/fsop/dir/Make.py
+./lib/fs/fsop/dir/Close.py
+
+@eons.kind(FSOp)
+def directory_close(this, f):
+	c = f.inode
+	upath = f.upath
+	f.close()
+	if c.closed:
+		if upath in this.open_items:
+			del this.open_items[upath]
+		this._restrict_size()DONE WITH ./lib/fs/fsop/dir/Close.py
+./lib/fs/fsop/dir/Open.py
+
+@eons.kind(FSOp)
+def directory_open(this, upath, io, lifetime=None):
+	f = this.get_dir_inode(upath, io, lifetime=lifetime)
+	return CachedDirHandle(upath, f)DONE WITH ./lib/fs/fsop/dir/Open.py
+./lib/fs/fsop/dir/GetInode.py
+
+@eons.kind(FSOp)
+def directory_getinode(this, upath, io, lifetime=None):
+	if lifetime is None:
+		lifetime = this.read_lifetime
+
+	f = this.open_items.get(upath)
+
+	if f is not None and not f.is_fresh(lifetime):
+		f = None
+		this.invalidate(upath, shallow=True)
+
+	if f is None:
+		cap = this.LookupCap(upath, io, read_only=False, lifetime=lifetime)
+		f = CachedDirInode(this, upath, io, dircap=cap)
+		this.open_items[upath] = f
+
+		# Add to item cache
+		cache_item = (time.time(), CachedDirHandle(upath, f))
+		if len(this._item_cache) < this._max_item_cache:
+			heapq.heappush(this._item_cache, cache_item)
+		else:
+			old_time, old_fh = heapq.heapreplace(this._item_cache,
+													cache_item)
+			this.close_dir(old_fh)
+
+		return f
+	else:
+		if not isinstance(f, CachedDirInode):
+			raise IOError(errno.ENOTDIR, "item is a file")
+		return fDONE WITH ./lib/fs/fsop/dir/GetInode.py
+./lib/fs/fsop/dir/Unlink.py
+
+@eons.kind(FSOpUnlink)
+def directory_unlink(this, upath, io, is_dir=False):
+	if upath == '':
+		raise IOError(errno.EACCES, "cannot unlink root directory")
+
+	# Unlink in cache
+	if is_dir:
+		f = this.open_dir(upath, io, lifetime=this.write_lifetime)
+	else:
+		f = this.open_file(upath, io, 0, lifetime=this.write_lifetime)
+	try:
+		f.inode.unlink()
+	finally:
+		if is_dir:
+			this.close_dir(f)
+		else:
+			this.close_file(f)
+
+	# Perform unlink
+	parent = this.open_dir(udirname(upath), io, lifetime=this.write_lifetime)
+	try:
+		parent_cap = parent.inode.info[1]['rw_uri']
+
+		upath_cap = parent_cap + '/' + ubasename(upath)
+		try:
+			cap = io.delete(upath_cap, iscap=True)
+		except (HTTPError, IOError) as err:
+			if isinstance(err, HTTPError) and err.code == 404:
+				raise IOError(errno.ENOENT, "no such file")
+			raise IOError(errno.EREMOTEIO, "failed to retrieve information")
+
+		# Remove from cache
+		parent.inode.cache_remove_child(ubasename(upath))
+	finally:
+		this.close_dir(parent)DONE WITH ./lib/fs/fsop/dir/Unlink.py
+./lib/fs/fsop/dir/GetAttributes.py
+
+@eons.kind(FSOpGetAttr)
+def directory_getattributes(this, upath, io):
+	if upath == '':
+		dir = this.open_dir(upath, io)
+		try:
+			info = dir.get_attr()
+		finally:
+			this.close_dir(dir)
+	else:
+		upath_parent = udirname(upath)
+		dir = this.open_dir(upath_parent, io)
+		try:
+			info = dir.get_child_attr(ubasename(upath))
+		except IOError as err:
+			if err.errno == errno.ENOENT and upath in this.open_items:
+				# New file that has not yet been uploaded
+				info = dict(this.open_items[upath].get_attr())
+				if 'mtime' not in info:
+					info['mtime'] = time.time()
+				if 'ctime' not in info:
+					info['ctime'] = time.time()
+			else:
+				raise
+		finally:
+			this.close_dir(dir)
+
+	if upath in this.open_items:
+		info.update(this.open_items[upath].get_attr())
+		if 'mtime' not in info:
+			info['mtime'] = time.time()
+		if 'ctime' not in info:
+			info['ctime'] = time.time()
+
+	return infoDONE WITH ./lib/fs/fsop/dir/GetAttributes.py

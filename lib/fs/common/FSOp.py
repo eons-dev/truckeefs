@@ -1,3 +1,22 @@
+"""
+lib/fs/common/FSOp.py
+
+Purpose:
+Defines the base class for File System Operations (FSOps). Each FSOps represents a single atomic operation (e.g. open, read, write).
+
+Place in Architecture:
+Serves as the foundation for all asynchronous and stateless FS operations. All other FSOp modules (for files and directories) inherit from this.
+
+Interface:
+
+	Inherits from eons.Functor.
+	No additional methods are defined here (all functionality is provided by the child FSOps).
+
+TODOs/FIXMEs:
+None.
+"""
+
+
 import eons
 
 # An FSOp, or File System Operation, is a Functor which performs a single operation on a file system.

@@ -1,3 +1,22 @@
+"""
+lib/tahoe/TahoeResponse.py
+
+Purpose:
+Wraps the HTTP response from a Tahoe API call.
+Place in Architecture:
+Acts as a thin wrapper around the response stream from urllib, allowing for standardized reading and closing of responses for Tahoe operations.
+
+Interface:
+
+	__init__(connection, req, is_put, timeout): Initializes the response.
+	read(size=None): Reads data from the response.
+	close(): Closes the response and notifies the connection.
+
+TODOs/FIXMEs:
+
+	TODO: Consider improving timeout handling for PUT requests (see comment about using default timeout for PUT).
+"""
+
 from urllib.request import Request, urlopen
 
 

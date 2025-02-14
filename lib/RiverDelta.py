@@ -1,3 +1,26 @@
+"""
+lib/RiverDelta.py
+
+Purpose:
+Tracks changes in the local/cache file system relative to the remote Tahoe state. It uses SQLAlchemy for persistent metadata storage and Redis for fast, transient state (such as semaphore locks).
+
+Place in Architecture:
+Acts as the “delta” engine that decides what needs syncing. It’s responsible for conflict detection and ensuring that the local authoritative state is maintained.
+
+Interface:
+
+	__init__(...): Sets up required SQL and Redis connection parameters.
+	Function(): Initializes SQLAlchemy and Redis connections.
+	Methods:
+		GetState(inode, process) / SetState(inode, process, state, expectedState=None): Get/set process states (read, write, sync).
+		GetRedisInodeValue(inode, key, coerceType=None) / SetRedisInodeValue(inode, key, value, expectedValue=None): Low-level access to ephemeral inode data in Redis.
+
+TODOs/FIXMEs:
+
+	The comments warn that conflicts with remote changes are not resolved and that remote changes may be clobbered—this is an area for future improvement if needed.
+"""
+
+
 import eons
 import logging
 import sqlalchemy

@@ -1,3 +1,22 @@
+"""
+lib/block/Utils.py
+
+Purpose:
+Provides utility functions for block-level operations.
+
+Place in Architecture:
+Used by the block caching and storage modules to compute block ranges and handle rounding (e.g. for partial blocks).
+
+Interface:
+
+	ceildiv(a, b): Computes the ceiling of a division.
+	block_range(offset, length, block_size, last_pos=None): Computes the overlapping block ranges for a given data range.
+
+TODOs/FIXMEs:
+None.
+"""
+
+
 def ceildiv(a, b):
 	"""Compute ceil(a/b); i.e. rounded towards positive infinity"""
 	return 1 + (a-1)//b

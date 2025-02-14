@@ -1,3 +1,19 @@
+"""
+lib/fs/fsop/file/Unlink.py
+
+Purpose:
+Unlinks (removes) a file from the filesystem.
+
+Place in Architecture:
+Handles file deletion both in the local cache and by issuing a delete command via the Tahoe API.
+
+Interface:
+
+	A function (decorated with @eons.kind(FSOpUnlink)) that takes a file upath and an I/O object and performs the unlink operation.
+
+TODOs/FIXMEs:
+None explicitly noted.
+"""
 
 @eons.kind(FSOpUnlink)
 def file_unlink(this, upath, io, is_dir=False):

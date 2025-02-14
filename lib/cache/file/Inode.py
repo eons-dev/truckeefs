@@ -1,3 +1,29 @@
+"""
+lib/cache/file/Inode.py
+
+Purpose:
+Implements the logical file on disk (the inode) for cached files. It manages file metadata, caching state, and read/write operations (via block caching).
+
+Place in Architecture:
+Central to the caching subsystem for files. It interacts with both the FileOnDisk (or CryptFile originally) layer and the block cache. It also ties into remote operations (upload/download) via the Tahoe API.
+
+Interface:
+
+	__init__(cachedb, upath, io, filecap, persistent=False): Loads or creates the cached file, sets up encryption keys (or in our revised version, plain keys), block cache, etc.
+	_load_info(upath, io, iscap=False) / _save_info(): Loads/saves file metadata.
+	is_fresh(lifetime): Checks if cached metadata is fresh.
+	incref()/decref(): Manage reference counts.
+	read(io, offset, length), write(io, offset, data): Perform I/O using the block cache.
+	truncate(size): Adjusts file size.
+	upload(io, parent_cap): Buffers the file and uploads it via the Tahoe API.
+	unlink(): Removes cached files from disk.
+
+TODOs/FIXMEs:
+
+	(Minor) Review or clarify the metadata fields and error conditions.
+	(If using encryption, update for plain I/O—this file may need adjustments if switching from Crypt to FileOnDisk.)
+"""
+
 class CachedFileInode(object):
 	"""
 	Logical file on-disk. There should be only a single CachedFileInode

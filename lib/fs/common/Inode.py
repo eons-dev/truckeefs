@@ -1,3 +1,27 @@
+"""
+lib/fs/common/Inode.py
+
+Purpose:
+Provides the base class for all filesystem inodes (files and directories). It handles persistence, caching, state management, and synchronization hooks.
+
+Place in Architecture:
+A core part of the FS layer. It abstracts common functionality for both file and directory inodes, including process state management (using Redis via RiverDelta) and database interactions.
+
+Interface:
+
+	__init__(upath, name): Initializes an inode with a path and a name.
+	Methods for state: GetState(), SetState(), WaitForState(), etc.
+	Ephemeral state access: GetEphemeral(), SetEphemeral(), InitializeEphemerals().
+	Class methods for creation: From(), GetId(), UpdateDatabaseWithPath(), GetPathInfoFromAuthority().
+	Methods for persistence: PopulateFSMethods(), ValidateArgs(), AddUpath(), IsFresh(), GetDataToSave(), LoadFromData(), Freeze(), Save(), Load(), and a factory method Create().
+	Stubs for synchronization: BeforePushUpstream(), PushUpstream(), AfterPushUpstream(), BeforePullDownstream(), PullDownstream(), and AfterPullDownstream().
+
+TODOs/FIXMEs:
+
+	TODO: Improve error handling around multi-threaded database and authority lookups (see comments about halting threads).
+	TODO: Further refine ephemeral state management for multi-server environments.
+"""
+
 import eons
 import threading
 import multiprocessing

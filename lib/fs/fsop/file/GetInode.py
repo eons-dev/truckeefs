@@ -1,3 +1,19 @@
+"""
+lib/fs/fsop/file/GetInode.py
+
+Purpose:
+Retrieves (or creates) the inode for a file, handling cache lookup, creation, and exclusive flags.
+
+Place in Architecture:
+Called by higher-level FS operations (like open) to ensure the correct inode is used for a file.
+
+Interface:
+
+	A function (decorated with @eons.kind(FSOp)) that takes upath, an I/O object, and flags (excl, creat, lifetime) and returns a CachedFileInode.
+
+TODOs/FIXMEs:
+None explicitly noted.
+"""
 
 @eons.kind(FSOp)
 def file_getinode(this, upath, io, excl=False, creat=False, lifetime=None):

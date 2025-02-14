@@ -1,3 +1,28 @@
+"""
+lib/tahoe/TahoeSyncWorker.py
+
+Purpose:
+Implements synchronization workers for pushing changes upstream (to Tahoe) and pulling changes downstream (from Tahoe). Runs as separate processes to offload synchronization.
+
+Place in Architecture:
+Bridges the local inode state (from the caching layer) with the remote Tahoe state. It is invoked for both file and directory sync operations.
+
+Interface:
+
+	Static methods:
+		SyncWorkerCommon(kwargs): Common initialization for sync workers.
+		DownstreamSyncWorker(kwargs): Worker for downloading updates from Tahoe.
+		UpstreamSyncWorker(kwargs): Worker for uploading changes to Tahoe.
+		GetInode(executor, inodeId): Retrieves the inode object for a given ID.
+		PushUpstreamToSource(executor, inode): Invokes the inode’s upstream methods.
+		PullDownstreamFromSource(executor, inode): Invokes the inode’s downstream methods.
+		CompleteSync(executor, inode, successful=True): Finalizes a sync operation.
+
+TODOs/FIXMEs:
+
+	NOTE: Comments indicate that these workers run on demand and do not continuously poll for changes; may need further work for multi-region synchronization.
+"""
+
 import eons
 from ..RiverFS import RiverFS
 

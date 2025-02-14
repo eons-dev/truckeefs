@@ -1,3 +1,25 @@
+"""
+lib/Utils.py
+
+Purpose:
+Provides a collection of utility functions used throughout the project.
+
+Place in Architecture:
+Used by nearly every module for common tasks such as timing, random data generation, JSON compression/decompression, and basic path manipulation.
+
+Interface:
+
+	ExponentialSleep(n, start=0.1, max_sleep=60): Sleeps for an exponentially increasing time.
+	RandomString(size): Returns a pseudo-random string of a given size.
+	json_zlib_dump(obj, fp) / json_zlib_load(fp): Dump and load JSON objects with zlib compression.
+	ZlibDecompressor(fp): A helper class for decompressing data streams.
+	udirname(upath), ubasename(upath): Path manipulation functions.
+	cache_score(size, t): Calculates a score for caching decisions.
+
+TODOs/FIXMEs:
+None explicitly noted.
+"""
+
 import time
 
 # Sleep for exponentially increasing time. `n` is the number of times

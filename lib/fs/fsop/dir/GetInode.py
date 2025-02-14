@@ -1,3 +1,19 @@
+"""
+lib/fs/fsop/dir/GetInode.py
+
+Purpose:
+Retrieves (or creates) the inode for a directory.
+
+Place in Architecture:
+Similar to the file version, it handles cache lookup/creation for directories. It also manages an internal item cache for recently used directory handles.
+
+Interface:
+
+    A function (decorated with @eons.kind(FSOp)) that takes a directory upath and an I/O object and returns a CachedDirInode.
+
+TODOs/FIXMEs:
+None explicitly noted.
+"""
 
 @eons.kind(FSOp)
 def directory_getinode(this, upath, io, lifetime=None):

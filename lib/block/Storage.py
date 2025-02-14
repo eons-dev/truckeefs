@@ -1,3 +1,23 @@
+"""
+lib/block/Storage.py
+
+Purpose:
+Implements a storage manager for fixed-size blocks. It maps logical block numbers to positions in an underlying file and manages free block indices.
+
+Place in Architecture:
+Provides the low-level storage backend for the block cache.
+Interface:
+
+	BlockStorage(f, block_size): Constructor.
+	save_state(f) / restore_state(f, state_file): Saves/restores the block map.
+	Methods for reconstructing the free map: _reconstruct_free_map(), _get_free_block_idx(), _add_free_block_idx(idx), _truncate_free_map(end_block).
+	Special methods: __contains__(idx), __getitem__(idx), __setitem__(idx, data), and truncate(num_blocks).
+
+TODOs/FIXMEs:
+None explicitly noted.
+"""
+
+
 import struct
 import errno
 import array

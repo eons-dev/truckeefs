@@ -1,3 +1,25 @@
+"""
+lib/cache/file/Handle.py
+
+Purpose:
+Provides the implementation of a logical file handle that “wraps” a cached file inode. Multiple open handles may point to the same underlying inode.
+
+Place in Architecture:
+Part of the caching layer. This class is used by the FUSE operations to read from or write to a file. It delegates actual I/O to the underlying CachedFileInode.
+
+Interface:
+
+	__init__(upath, inode, flags): Initializes the handle (increments inode ref count, sets up locks, and validates open flags).
+	close(): Closes the handle (decrements ref count).
+	read(io, offset, length): Reads data from the inode.
+	write(io, offset, data): Writes data to the inode.
+	get_size(): Returns the file size.
+	truncate(size): Truncates the file.
+
+TODOs/FIXMEs:
+None explicitly noted in this file.
+"""
+
 class CachedFileHandle(object):
 	"""
 	Logical file handle. There may be multiple open file handles

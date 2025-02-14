@@ -1,3 +1,19 @@
+"""
+lib/fs/fsop/file/Open.py
+
+Purpose:
+Opens a file for reading or writing.
+
+Place in Architecture:
+Maps the FUSE open call to the underlying cache layer by returning a CachedFileHandle that wraps the inode.
+
+Interface:
+
+	A function (decorated with @eons.kind(FSOp)) that takes upath, an I/O object, flags, and lifetime, and returns a CachedFileHandle.
+
+TODOs/FIXMEs:
+None explicitly noted.
+"""
 
 @eons.kind(FSOp)
 def file_open(this, upath, io, flags, lifetime=None):

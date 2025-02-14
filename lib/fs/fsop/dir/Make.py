@@ -1,3 +1,19 @@
+"""
+lib/fs/fsop/dir/Make.py
+
+Purpose:
+Creates a new directory in the filesystem.
+
+Place in Architecture:
+Implements the mkdir operation. It verifies that the parent directory exists, that the target does not already exist, and then issues the creation via the Tahoe API, updating the cache.
+
+Interface:
+
+	A function (decorated with @eons.kind(FSOp)) that takes a directory upath and an I/O object and performs the directory creation.
+
+TODOs/FIXMEs:
+None explicitly noted.
+"""
 
 @eons.kind(FSOp)
 def directory_make(this, upath, io):

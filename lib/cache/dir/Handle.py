@@ -1,3 +1,24 @@
+"""
+lib/cache/dir/Handle.py
+
+Purpose:
+Implements the logical directory handle. This is used to access directory metadata in the cache.
+
+Place in Architecture:
+Part of the directory caching layer. It wraps a CachedDirInode and provides directory-specific operations for FUSE (e.g. listing contents).
+
+Interface:
+
+	__init__(upath, inode): Initializes by wrapping a CachedDirInode and incrementing its ref count.
+	close(): Closes the handle (decrements the inode ref count).
+	listdir(): Returns the list of directory entries.
+	get_attr(): Retrieves attributes of the directory.
+	get_child_attr(childname): Retrieves attributes for a specific child entry.
+
+TODOs/FIXMEs:
+None explicitly noted.
+"""
+
 class CachedDirHandle(object):
 	"""
 	Logical directory handle.

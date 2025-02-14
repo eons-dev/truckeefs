@@ -1,3 +1,24 @@
+"""
+lib/tahoe/TahoeConnection.py
+
+Purpose:
+Provides an API client for interacting with a Tahoe LAFS node. It wraps HTTP methods (GET, POST, PUT, DELETE) and constructs appropriate URLs based on a root capability.
+
+Place in Architecture:
+The primary interface between your local file system and the remote Tahoe backend. All remote file operations (e.g. file upload/download, directory creation) go through this connection.
+
+Interface:
+
+	__init__(base_url, rootcap, timeout, max_connections=10): Initializes the connection parameters and semaphores for concurrency.
+	Internal methods: _get_response(), _release_response(), wait_until_write_allowed(), _url(), _get_request().
+	Public methods:
+		_get(), _post(), _put(), _delete()
+		get_info(path, iscap=False), get_content(path, offset, length, iscap=False), put_file(path, f, iscap=False), delete(path, iscap=False), mkdir(path, iscap=False).
+
+TODOs/FIXMEs:
+Minor comments regarding PUT request timeout and send-buffer size; consider switching to a more flexible HTTP client library (e.g. requests) if needed.
+"""
+
 from urllib.request import Request, urlopen
 from urllib.parse import quote
 from urllib.error import HTTPError

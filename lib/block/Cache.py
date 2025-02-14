@@ -1,3 +1,25 @@
+"""
+lib/block/Cache.py
+
+Purpose:
+Implements a block cache for remote files. It allows a file to be cached on a per‑block basis and tracks which blocks still need to be retrieved from the remote source.
+
+Place in Architecture:
+Sits between the FileOnDisk (or CryptFile) layer and the remote file system. It enables partial reads/writes and lazy fetching of missing blocks.
+
+Interface:
+
+	BlockCachedFile(f, initial_cache_size, block_size=None): Constructor.
+	save_state(f) / restore_state(f, state_file): Persists or recovers cache state.
+	_pad_file(new_size): Pads the file with zeros if needed.
+	receive_cached_data(offset, data_list): Accepts data read from the remote file to update the cache.
+	get_size(), get_file(), close(), truncate(size), write(offset, data), read(offset, length), pre_read(offset, length), pre_write(offset, length).
+	BlockCachedFileHandle: A read-only file handle wrapper for cached files.
+
+TODOs/FIXMEs:
+None explicitly noted.
+"""
+
 import struct
 import errno
 import array

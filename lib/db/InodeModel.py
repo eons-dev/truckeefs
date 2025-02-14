@@ -1,3 +1,22 @@
+"""
+lib/db/InodeModel.py
+
+Purpose:
+Defines the SQLAlchemy ORM model for filesystem inodes. Each inode stores metadata independent of its path (allowing renaming without loss of identity).
+
+Place in Architecture:
+Provides persistent storage for inode metadata (file/directory attributes, parents, children, etc.) used by the RiverFS layer.
+
+Interface:
+
+	Defines columns: id, name, kind, meta, last_accessed, parents, children, data.
+	__repr__(): Provides a string representation of the model.
+
+TODOs/FIXMEs:
+
+	Consider refining how JSON is stored for columns like parents and children and review indexing/performance.
+"""
+
 import sqlalchemy as sql
 import sqlalchemy.orm as orm
 

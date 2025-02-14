@@ -1,3 +1,30 @@
+"""
+lib/cache/dir/Inode.py
+
+Purpose:
+Represents a logical directory on disk (the inode for a directory) and manages its metadata, including child entries.
+
+Place in Architecture:
+A key component of the caching system for directory metadata. It is used when listing directories and looking up child attributes.
+
+Interface:
+
+	__init__(cachedb, upath, io, dircap=None): Loads or creates the cached directory metadata.
+	_save_info(): Persists directory metadata to disk.
+	is_fresh(lifetime): Checks if the metadata is still current.
+	incref()/decref()/close(): Reference counting and cleanup.
+	listdir(): Returns a list of children.
+	get_attr(): Returns directory attributes.
+	get_child_attr(childname): Returns attributes for a child entry (handles file vs. directory differentiation).
+	unlink(): Removes the directory from the cache.
+	cache_add_child(basename, cap, size): Adds or updates a child entry in the cache.
+	cache_remove_child(basename): Removes a child entry.
+
+TODOs/FIXMEs:
+
+	There's a comment regarding the use of 'tahoe:linkcrtime' vs. 'linkmotime' for timestamps in get_child_attr.
+"""
+
 class CachedDirInode(object):
 	"""
 	Logical file on-disk directory. There should be only a single CachedDirInode

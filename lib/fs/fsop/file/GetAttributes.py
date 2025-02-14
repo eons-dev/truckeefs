@@ -1,3 +1,19 @@
+"""
+lib/fs/fsop/file/GetAttributes.py
+
+Purpose:
+Retrieves attributes for a file (used for the FUSE getattr operation).
+
+Place in Architecture:
+Maps a file’s metadata (from the cache and remote state) to a dictionary that FUSE expects.
+
+Interface:
+
+	A function (decorated with @eons.kind(FSOp)) that takes a file upath and an I/O object and returns attributes.
+
+TODOs/FIXMEs:
+None explicitly noted.
+"""
 
 @eons.kind(FSOpGetAttr)
 def file_getattributes(this, upath, io):

@@ -1,3 +1,28 @@
+"""
+lib/RiverFS.py
+
+Purpose:
+Implements the RiverFS executor—a generic file system that adds caching (and formerly encryption) on top of a remote TahoeFS backend.
+
+Place in Architecture:
+Acts as the central coordinator for operations. It initializes network connections (via TahoeConnection), sets up caching directories, manages process state, and serves as the “brain” behind the file system’s asynchronous operations.
+
+Interface:
+
+    Inherits from eons.Executor.
+    Sets up required and optional arguments (e.g. path, rootcap, cache_dir, cache_size, etc.).
+    Methods include:
+        ValidateArgs(): Checks and converts arguments (e.g. cache sizes, TTL).
+        BeforeFunction(): Initializes the TahoeConnection and starts RiverDelta.
+        Function(): (Abstract) to be implemented by child classes.
+        Helper methods like GetCachedInodeByUpath(), CacheInode(), GetSourceConnection(), GeneratePrivateKey(), WalkCache(), RestrictCacheSize(), InvalidateCache(), LookupCap(), and GetFileNameAndKey().
+
+TODOs/FIXMEs:
+
+    No explicit TODOs, but note that key derivation and encryption aspects (e.g. in GeneratePrivateKey) may need revisiting if you drop cryptographic features.
+    Documentation comments note that certain state fields must remain immutable after startup for thread safety.
+"""
+
 import eons
 import os
 import time

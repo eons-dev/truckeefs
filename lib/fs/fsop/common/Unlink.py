@@ -1,3 +1,19 @@
+"""
+lib/fs/fsop/common/Unlink.py
+
+Purpose:
+Implements a generic FS operation for unlinking (removing) a filesystem object.
+
+Place in Architecture:
+Used by both file and directory unlink operations. It removes an inode from the cache and triggers remote deletion.
+
+Interface:
+
+	A function (decorated with @eons.kind(FSOp)) that takes upath, an I/O object, and a flag indicating whether it’s a directory.
+
+TODOs/FIXMEs:
+None explicitly noted.
+"""
 
 @eons.kind(FSOp)
 def FSOpUnlink(this, upath, io, is_dir=False):

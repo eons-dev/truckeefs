@@ -1,3 +1,26 @@
+"""
+lib/fs/Directory.py
+
+Purpose:
+Implements a Directory inode (subclass of Inode) specialized for directories.
+
+Place in Architecture:
+Represents directories in the local cache. It stores a list of children and provides methods for syncing directory metadata.
+
+Interface:
+
+	__init__(upath, name="Directory"): Initializes a Directory inode.
+	GetDataToSave(): Returns a dictionary of data (including children) for persistence.
+	LoadFromData(data): Loads metadata from persistent storage.
+	Freeze(): (No special action; may remain as pass.)
+	Stub methods for: BeforePushUpstream(), PushUpstream(), AfterPushUpstream(), BeforePullDownstream(), PullDownstream(), and AfterPullDownstream().
+
+TODOs/FIXMEs:
+
+	TODO: Implement the sync methods if directory-specific sync is needed.
+"""
+
+
 import eons
 from .Inode import *
 
@@ -53,7 +76,7 @@ class Directory (Inode):
 
 	def AfterPushUpstream(this):
 		# Mark directory as synced.
-    	this.dirty = False
+		this.dirty = False
 
 	
 	def BeforePullDownstream(this):
@@ -80,4 +103,4 @@ class Directory (Inode):
 	
 	def AfterPullDownstream(this):
 		# Update retrieval time.
-    	this.info[1]['retrieved'] = time.time()
+		this.info[1]['retrieved'] = time.time()
