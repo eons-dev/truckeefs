@@ -8,7 +8,7 @@ import array
 from StandardTestFixture import StandardTestFixture
 
 from libtruckeefs import BlockCachedFile, BlockStorage, block_range, ceildiv
-from libtruckeefs import CryptFile
+from libtruckeefs import FileOnDisk
 
 
 class TestBlockCachedFile(StandardTestFixture):
@@ -163,7 +163,7 @@ class TestBlockCachedFile(StandardTestFixture):
 		f.close()
 
 	def test_on_top_cryptfile(this):
-		tmpf = CryptFile(this.file_name, key=b"a"*32, mode='w+b')
+		tmpf = FileOnDisk(this.file_name, key=b"a"*32, mode='w+b')
 		f = BlockCachedFile(tmpf, len(this.cache_data), block_size=37)
 
 		this._do_write(f, 0, b"b"*1237)
@@ -180,19 +180,19 @@ class TestBlockCachedFile(StandardTestFixture):
 		sim_data = array.array('b', this.cache_data + b"\x00"*(max_file_size-file_size))
 
 		# Do random I/O on a file
-		tmpf = CryptFile(this.file_name, key=b"a"*32, mode='w+b')
+		tmpf = FileOnDisk(this.file_name, key=b"a"*32, mode='w+b')
 		f = BlockCachedFile(tmpf, file_size, block_size=7)
 		file_size = this._do_random_rw(f, sim_data, file_size, max_file_size, count=17)
 
 		# Save state
-		state_file = CryptFile(this.file_name + '.state', key=b"b"*32, mode='w+b')
+		state_file = FileOnDisk(this.file_name + '.state', key=b"b"*32, mode='w+b')
 		f.save_state(state_file)
 		state_file.close()
 		f.close()
 
 		# Restore state
-		state_file = CryptFile(this.file_name + '.state', key=b"b"*32, mode='rb')
-		tmpf = CryptFile(this.file_name, key=b"a"*32, mode='r+b')
+		state_file = FileOnDisk(this.file_name + '.state', key=b"b"*32, mode='rb')
+		tmpf = FileOnDisk(this.file_name, key=b"a"*32, mode='r+b')
 		f = BlockCachedFile.restore_state(tmpf, state_file)
 		state_file.close()
 

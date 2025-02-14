@@ -14,14 +14,14 @@ class CachedDirInode(object):
 		this.filename, this.key = cachedb.GetFileNameAndKey(upath)
 
 		try:
-			with CryptFile(this.filename, key=this.key, mode='rb') as f:
+			with FileOnDisk(this.filename, key=this.key, mode='rb') as f:
 				this.info = json_zlib_load(f)
 			os.utime(this.filename, None)
 			return
 		except (IOError, OSError, ValueError):
 			pass
 
-		f = CryptFile(this.filename, key=this.key, mode='w+b')
+		f = FileOnDisk(this.filename, key=this.key, mode='w+b')
 		try:
 			if dircap is not None:
 				this.info = io.get_info(dircap, iscap=True)
@@ -36,7 +36,7 @@ class CachedDirInode(object):
 			f.close()
 
 	def _save_info(this):
-		with CryptFile(this.filename, key=this.key, mode='w+b') as f:
+		with FileOnDisk(this.filename, key=this.key, mode='w+b') as f:
 			json_zlib_dump(this.info, f)
 
 	def is_fresh(this, lifetime):

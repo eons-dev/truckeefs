@@ -36,13 +36,13 @@ class CachedFileInode(object):
 				raise ValueError()
 
 			# Reuse cached metadata
-			this.f = CryptFile(filename, key=key, mode='r+b')
+			this.f = FileOnDisk(filename, key=key, mode='r+b')
 			this.info = json_zlib_load(this.f)
 
 			if persistent:
 				# Reuse cached data
-				this.f_state = CryptFile(filename_state, key=key_state, mode='r+b')
-				this.f_data = CryptFile(filename_data, key=key_data, mode='r+b')
+				this.f_state = FileOnDisk(filename_state, key=key_state, mode='r+b')
+				this.f_data = FileOnDisk(filename_data, key=key_data, mode='r+b')
 				this.block_cache = BlockCachedFile.restore_state(this.f_data, this.f_state)
 				open_complete = True
 		except (IOError, OSError, ValueError):
@@ -57,7 +57,7 @@ class CachedFileInode(object):
 
 		if not open_complete:
 			if this.f is None:
-				this.f = CryptFile(filename, key=key, mode='w+b')
+				this.f = FileOnDisk(filename, key=key, mode='w+b')
 				try:
 					if filecap is not None:
 						this._load_info(filecap, io, iscap=True)
@@ -70,13 +70,13 @@ class CachedFileInode(object):
 					raise
 
 			# Create a data file
-			this.f_data = CryptFile(filename_data, key=key_data, mode='w+b')
+			this.f_data = FileOnDisk(filename_data, key=key_data, mode='w+b')
 
 			# Block cache on top of data file
 			this.block_cache = BlockCachedFile(this.f_data, this.info[1]['size'])
 
 			# Block data state file
-			this.f_state = CryptFile(filename_state, key=key_state, mode='w+b')
+			this.f_state = FileOnDisk(filename_state, key=key_state, mode='w+b')
 
 		os.utime(this.f.path, None)
 		os.utime(this.f_data.path, None)

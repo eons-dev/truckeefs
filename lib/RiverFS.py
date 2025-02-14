@@ -14,7 +14,7 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from .Tahoe import *
-from .Crypt import *
+from .FileOnDisk import *
 # .block.Cache
 from .block.Cache import *
 
@@ -221,7 +221,7 @@ class RiverFS(eons.Executor):
 				continue
 
 			try:
-				with CryptFile(fn, key=key, mode='rb') as f:
+				with FileOnDisk(fn, key=key, mode='rb') as f:
 					data = json_zlib_load(f)
 					if data[0] == 'dirnode':
 						children = list(data[1].get('children', {}).items())
