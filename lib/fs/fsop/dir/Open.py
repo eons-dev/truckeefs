@@ -16,6 +16,6 @@ None explicitly noted.
 """
 
 @eons.kind(FSOp)
-def directory_open(this, upath, io, lifetime=None):
-	f = this.get_dir_inode(upath, io, lifetime=lifetime)
-	return CachedDirHandle(upath, f)
+def directory_open(this, upath, io, ttl=None):
+	file = this.get_dir_inode(upath, io, lifetime=ttl)
+	return CachedDirHandle(upath, file)

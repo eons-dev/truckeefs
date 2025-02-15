@@ -8,8 +8,8 @@ Place in Architecture:
 Provides the low-level storage backend for the block cache.
 Interface:
 
-	BlockStorage(f, block_size): Constructor.
-	save_state(f) / restore_state(f, state_file): Saves/restores the block map.
+	BlockStorage(file, block_size): Constructor.
+	save_state(file) / restore_state(file, state_file): Saves/restores the block map.
 	Methods for reconstructing the free map: _reconstruct_free_map(), _get_free_block_idx(), _add_free_block_idx(idx), _truncate_free_map(end_block).
 	Special methods: __contains__(idx), __getitem__(idx), __setitem__(idx, data), and truncate(num_blocks).
 
@@ -39,17 +39,17 @@ class BlockStorage(object):
 	File storing fixed-size blocks of data.
 	"""
 
-	def __init__(this, f, block_size):
-		this.f = f
+	def __init__(this, file, block_size):
+		this.file = file
 		this.block_size = block_size
 		this.block_map = array.array('l')
 		this.zero_block = b"\x00"*this.block_size
 		this._reconstruct_free_map()
 
-	def save_state(this, f):
-		f.truncate(0)
-		f.seek(0)
-		f.write(b"BLK2")
+	def save_state(this, file):
+		file.truncate(0)
+		file.seek(0)
+		file.write(b"BLK2")
 
 		# Using zlib here is mainly for obfuscating information on the
 		# total size of sparse files. The size of the map file will
@@ -57,11 +57,11 @@ class BlockStorage(object):
 		# compression reduces its correlation with the total size of
 		# the file.
 		block_map_data = zlib.compress(this.block_map.tobytes(), 9)
-		f.write(struct.pack('<QQ', this.block_size, len(block_map_data)))
-		f.write(block_map_data)
+		file.write(struct.pack('<QQ', this.block_size, len(block_map_data)))
+		file.write(block_map_data)
 
 	@classmethod
-	def restore_state(cls, f, state_file):
+	def restore_state(cls, file, state_file):
 		hdr = state_file.read(4)
 		if hdr != b"BLK2":
 			raise ValueError("invalid block storage state file")
@@ -77,7 +77,7 @@ class BlockStorage(object):
 		del s
 
 		this = cls.__new__(cls)
-		this.f = f
+		this.file = file
 		this.block_size = block_size
 		this.block_map = block_map
 		this.zero_block = b"\x00"*this.block_size
@@ -136,8 +136,8 @@ class BlockStorage(object):
 
 		block_idx = this.block_map[idx]
 		if block_idx >= 0:
-			this.f.seek(this.block_size * block_idx)
-			block = this.f.read(this.block_size)
+			this.file.seek(this.block_size * block_idx)
+			block = this.file.read(this.block_size)
 			if len(block) < this.block_size:
 				# Partial block (end-of-file): consider zero-padded
 				block += b"\x00"*(this.block_size - len(block))
@@ -173,13 +173,13 @@ class BlockStorage(object):
 				# only. Such blocks will be automatically zero-padded
 				# by POSIX if writes are done to subsequent blocks.
 				# Other blocks need explicit padding.
-				this.f.seek(0, 2)
-				pos = this.f.tell()
+				this.file.seek(0, 2)
+				pos = this.file.tell()
 				if pos > this.block_size * block_idx + len(data):
 					data += b"\x00" * (this.block_size - len(data))
 
-			this.f.seek(this.block_size * block_idx)
-			this.f.write(data)
+			this.file.seek(this.block_size * block_idx)
+			this.file.write(data)
 
 	def truncate(this, num_blocks):
 		this.block_map = this.block_map[:num_blocks]
@@ -187,5 +187,5 @@ class BlockStorage(object):
 		end_block = 0
 		if this.block_map:
 			end_block = max(0, max(this.block_map) + 1)
-		this.f.truncate(this.block_size * end_block)
+		this.file.truncate(this.block_size * end_block)
 		this._truncate_free_map(end_block)

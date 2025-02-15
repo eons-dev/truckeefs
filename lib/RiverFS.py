@@ -169,10 +169,10 @@ class RiverFS(eons.Executor):
 		# Get salt
 		salt_fn = os.path.join(this.cache_dir, 'salt')
 		try:
-			with open(salt_fn, 'rb') as f:
-				numiter = f.read(4)
-				salt = f.read(32)
-				salt_hkdf = f.read(32)
+			with open(salt_fn, 'rb') as file:
+				numiter = file.read(4)
+				salt = file.read(32)
+				salt_hkdf = file.read(32)
 				if len(numiter) != 4 or len(salt) != 32 or len(salt_hkdf) != 32:
 					raise ValueError()
 				numiter = struct.unpack('<I', numiter)[0]
@@ -200,10 +200,10 @@ class RiverFS(eons.Executor):
 			numiter = max(10000, int(count * 1.0 / (time.time() - start)))
 
 			# Write salt etc.
-			with open(salt_fn, 'wb') as f:
-				f.write(struct.pack('<I', numiter))
-				f.write(salt)
-				f.write(salt_hkdf)
+			with open(salt_fn, 'wb') as file:
+				file.write(struct.pack('<I', numiter))
+				file.write(salt)
+				file.write(salt_hkdf)
 
 		# Derive key
 		kdf = PBKDF2HMAC(
@@ -244,8 +244,8 @@ class RiverFS(eons.Executor):
 				continue
 
 			try:
-				with FileOnDisk(fn, key=key, mode='rb') as f:
-					data = json_zlib_load(f)
+				with FileOnDisk(fn, key=key, mode='rb') as file:
+					data = json_zlib_load(file)
 					if data[0] == 'dirnode':
 						children = list(data[1].get('children', {}).items())
 					else:
@@ -294,16 +294,16 @@ class RiverFS(eons.Executor):
 
 	def InvalidateCache(this, root_upath="", shallow=False):
 		if root_upath == "" and not shallow:
-			for f in this.open_items.values():
-				f.invalidated = True
+			for file in this.open_items.values():
+				file.invalidated = True
 			this.open_items = {}
 			dead_file_set = os.listdir(this.cache_dir)
 		else:
 			dead_file_set = set()
 			for fn, upath in this.WalkCache(root_upath):
-				f = this.open_items.pop(upath, None)
-				if f is not None:
-					f.invalidated = True
+				file = this.open_items.pop(upath, None)
+				if file is not None:
+					file.invalidated = True
 				dead_file_set.add(fn)
 				if shallow and upath != root_upath:
 					break

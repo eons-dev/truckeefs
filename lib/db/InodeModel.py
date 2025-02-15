@@ -9,12 +9,12 @@ Provides persistent storage for inode metadata (file/directory attributes, paren
 
 Interface:
 
-	Defines columns: id, name, kind, meta, last_accessed, parents, children, data.
+	Defines sql.Columns: id, name, kind, meta, last_accessed, parents, children, data.
 	__repr__(): Provides a string representation of the model.
 
 TODOs/FIXMEs:
 
-	Consider refining how JSON is stored for columns like parents and children and review indexing/performance.
+	Consider refining how JSON is stored for sql.Columns like parents and children and review indexing/performance.
 """
 
 import sqlalchemy as sql
@@ -31,11 +31,11 @@ class InodeModel(orm.declarative_base()):
 	kind = sql.Column(sql.String, nullable=False) # Python class name for re-creating the right Inode subclass.
 
 	# Filesystem data.
-	meta = Column(sql.JSON) # For storing metadata, e.g. xattrs
+	meta = sql.Column(sql.JSON) # For storing metadata, e.g. xattrs
 	last_accessed = sql.Column(sql.Integer, default=0) # Access time is used in caching, so stored separately / doubly from `meta`.
-	parents = Column(sql.JSON)
-	children = Column(sql.JSON) # Only for directories
-	data = Column(sql.String) # Only for files. Path to file on disk, not actual file data.
+	parents = sql.Column(sql.JSON)
+	children = sql.Column(sql.JSON) # Only for directories
+	data = sql.Column(sql.String) # Only for files. Path to file on disk, not actual file data.
 
 	def __repr__(this):
 		return f"<{this.name} ({this.id}) @ {this.upath}>"

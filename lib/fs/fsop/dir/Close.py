@@ -16,11 +16,11 @@ None explicitly noted.
 """
 
 @eons.kind(FSOp)
-def directory_close(this, f):
-	c = f.inode
-	upath = f.upath
-	f.close()
-	if c.closed:
+def directory_close(this, file):
+	inode = file.inode
+	upath = file.upath
+	file.close()
+	if inode.closed:
 		if upath in this.open_items:
 			del this.open_items[upath]
 		this._restrict_size()

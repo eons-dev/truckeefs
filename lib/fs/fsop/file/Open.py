@@ -9,29 +9,29 @@ Maps the FUSE open call to the underlying cache layer by returning a CachedFileH
 
 Interface:
 
-	A function (decorated with @eons.kind(FSOp)) that takes upath, an I/O object, flags, and lifetime, and returns a CachedFileHandle.
+	A function (decorated with @eons.kind(FSOp)) that takes upath, an I/O object, flags, and ttl, and returns a CachedFileHandle.
 
 TODOs/FIXMEs:
 None explicitly noted.
 """
 
 @eons.kind(FSOp)
-def file_open(this, upath, io, flags, lifetime=None):
+def file_open(this, upath, io, flags, ttl=None):
 	writeable = (flags & (os.O_RDONLY | os.O_RDWR | os.O_WRONLY)) in (os.O_RDWR, os.O_WRONLY)
 	if writeable:
 		# Drop file data cache before opening in write mode
 		if upath not in this.open_items:
 			this.invalidate(upath)
 
-		# Limit e.g. parent directory lookup lifetime
-		if lifetime is None:
-			lifetime = this.write_lifetime
+		# Limit e.g. parent directory lookup ttl
+		if ttl is None:
+			ttl = this.write_lifetime
 
-	f = this.get_file_inode(
+	file = this.get_file_inode(
 		upath,
 		io,
 		excl=(flags & os.O_EXCL),
 		creat=(flags & os.O_CREAT),
-		lifetime=lifetime
+		lifetime=ttl
 	)
-	return CachedFileHandle(upath, f, flags)
+	return CachedFileHandle(upath, file, flags)

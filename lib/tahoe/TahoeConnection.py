@@ -13,7 +13,7 @@ Interface:
 	Internal methods: _get_response(), _release_response(), wait_until_write_allowed(), _url(), _get_request().
 	Public methods:
 		_get(), _post(), _put(), _delete()
-		get_info(path, iscap=False), get_content(path, offset, length, iscap=False), put_file(path, f, iscap=False), delete(path, iscap=False), mkdir(path, iscap=False).
+		get_info(path, iscap=False), get_content(path, offset, length, iscap=False), put_file(path, file, iscap=False), delete(path, iscap=False), mkdir(path, iscap=False).
 
 TODOs/FIXMEs:
 Minor comments regarding PUT request timeout and send-buffer size; consider switching to a more flexible HTTP client library (e.g. requests) if needed.
@@ -135,33 +135,33 @@ class TahoeConnection(object):
 		return this._get_response(req, False)
 
 	def get_info(this, path, iscap=False):
-		f = this._get(path, {'t': 'json'}, iscap=iscap)
+		file = this._get(path, {'t': 'json'}, iscap=iscap)
 		try:
-			data = json.load(f)
+			data = json.load(file)
 		finally:
-			f.close()
+			file.close()
 		return data
 
 	def get_content(this, path, offset=None, length=None, iscap=False):
 		return this._get(path, offset=offset, length=length, iscap=iscap)
 
-	def put_file(this, path, f, iscap=False):
-		f = this._put(path, data=f, iscap=iscap)
+	def put_file(this, path, file, iscap=False):
+		file = this._put(path, data=file, iscap=iscap)
 		try:
-			return f.read().decode('utf-8').strip()
+			return file.read().decode('utf-8').strip()
 		finally:
-			f.close()
+			file.close()
 
 	def delete(this, path, iscap=False):
-		f = this._delete(path, iscap=iscap)
+		file = this._delete(path, iscap=iscap)
 		try:
-			return f.read().decode('utf-8').strip()
+			return file.read().decode('utf-8').strip()
 		finally:
-			f.close()
+			file.close()
 
 	def mkdir(this, path, iscap=False):
-		f = this._post(path, params={'t': 'mkdir'}, iscap=iscap)
+		file = this._post(path, params={'t': 'mkdir'}, iscap=iscap)
 		try:
-			return f.read().decode('utf-8').strip()
+			return file.read().decode('utf-8').strip()
 		finally:
-			f.close()
+			file.close()

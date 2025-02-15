@@ -22,16 +22,16 @@ def FSOpUnlink(this, upath, io, is_dir=False):
 
 	# Unlink in cache
 	if is_dir:
-		f = this.open_dir(upath, io, lifetime=this.write_lifetime)
+		file = this.open_dir(upath, io, lifetime=this.write_lifetime)
 	else:
-		f = this.open_file(upath, io, 0, lifetime=this.write_lifetime)
+		file = this.open_file(upath, io, 0, lifetime=this.write_lifetime)
 	try:
-		f.inode.unlink()
+		file.inode.unlink()
 	finally:
 		if is_dir:
-			this.close_dir(f)
+			this.close_dir(file)
 		else:
-			this.close_file(f)
+			this.close_file(file)
 
 	# Perform unlink
 	parent = this.open_dir(udirname(upath), io, lifetime=this.write_lifetime)

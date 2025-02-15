@@ -16,18 +16,18 @@ None explicitly noted.
 """
 
 @eons.kind(FSOp)
-def file_upload(this, c, io):
-	if isinstance(c, CachedFileHandle):
-		c = c.inode
+def file_upload(this, inode, io):
+	if isinstance(inode, CachedFileHandle):
+		inode = inode.inode
 
-	if c.upath is not None and c.dirty:
-		parent = this.open_dir(udirname(c.upath), io, lifetime=this.write_lifetime)
+	if inode.upath is not None and inode.dirty:
+		parent = this.open_dir(udirname(inode.upath), io, lifetime=this.write_lifetime)
 		try:
 			parent_cap = parent.inode.info[1]['rw_uri']
 
 			# Upload
 			try:
-				cap = c.upload(io, parent_cap=parent_cap)
+				cap = inode.upload(io, parent_cap=parent_cap)
 			except:
 				# Failure to upload --- need to invalidate parent
 				# directory, since the file might not have been
@@ -36,6 +36,6 @@ def file_upload(this, c, io):
 				raise
 
 			# Add in cache
-			parent.inode.cache_add_child(ubasename(c.upath), cap, size=c.get_size())
+			parent.inode.cache_add_child(ubasename(inode.upath), cap, size=inode.get_size())
 		finally:
 			this.close_dir(parent)

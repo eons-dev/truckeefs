@@ -211,7 +211,7 @@ class TahoeSyncWorker(eons.Functor):
 	# Release databse locks
 	@staticmethod
 	def CompleteSync(executor, inode, successful=True):
-		inode.SetEphemeral('sync_pid', "", os.getpid()
+		inode.SetEphemeral('sync_pid', "", os.getpid())
 		inode.SetEphemeral('sync_host', "", socket.gethostname())
 		success = "successful" if successful else "unsuccessful"
 		logging.info(f"Inode {obj.name} (ID: {inodeId}) sync {success}.")

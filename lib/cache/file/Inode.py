@@ -46,7 +46,7 @@ class CachedFileInode(object):
 		this.lock = threading.RLock()
 		this.cache_lock = threading.RLock()
 		this.dirty = False
-		this.f = None
+		this.file = None
 		this.f_state = None
 		this.f_data = None
 
@@ -62,8 +62,8 @@ class CachedFileInode(object):
 				raise ValueError()
 
 			# Reuse cached metadata
-			this.f = FileOnDisk(filename, key=key, mode='r+b')
-			this.info = json_zlib_load(this.f)
+			this.file = FileOnDisk(filename, key=key, mode='r+b')
+			this.info = json_zlib_load(this.file)
 
 			if persistent:
 				# Reuse cached data
@@ -73,17 +73,17 @@ class CachedFileInode(object):
 				open_complete = True
 		except (IOError, OSError, ValueError):
 			open_complete = False
-			if this.f is not None:
-				this.f.close()
-				this.f = None
+			if this.file is not None:
+				this.file.close()
+				this.file = None
 			if this.f_state is not None:
 				this.f_state.close()
 			if this.f_data is not None:
 				this.f_data.close()
 
 		if not open_complete:
-			if this.f is None:
-				this.f = FileOnDisk(filename, key=key, mode='w+b')
+			if this.file is None:
+				this.file = FileOnDisk(filename, key=key, mode='w+b')
 				try:
 					if filecap is not None:
 						this._load_info(filecap, io, iscap=True)
@@ -92,7 +92,7 @@ class CachedFileInode(object):
 						this.dirty = True
 				except IOError as err:
 					os.unlink(filename)
-					this.f.close()
+					this.file.close()
 					raise
 
 			# Create a data file
@@ -104,7 +104,7 @@ class CachedFileInode(object):
 			# Block data state file
 			this.f_state = FileOnDisk(filename_state, key=key_state, mode='w+b')
 
-		os.utime(this.f.path, None)
+		os.utime(this.file.path, None)
 		os.utime(this.f_data.path, None)
 		os.utime(this.f_state.path, None)
 
@@ -118,11 +118,11 @@ class CachedFileInode(object):
 		this._save_info()
 
 	def _save_info(this):
-		this.f.truncate(0)
-		this.f.seek(0)
+		this.file.truncate(0)
+		this.file.seek(0)
 		if 'retrieved' not in this.info[1]:
 			this.info[1]['retrieved'] = time.time()
-		json_zlib_dump(this.info, this.f)
+		json_zlib_dump(this.info, this.file)
 
 	def is_fresh(this, lifetime):
 		if 'retrieved' not in this.info[1]:
@@ -151,7 +151,7 @@ class CachedFileInode(object):
 				this.block_cache.save_state(this.f_state)
 				this.f_state.close()
 				this.block_cache.close()
-				this.f.close()
+				this.file.close()
 
 				if not this.persistent and this.upath is not None and not this.invalidated:
 					os.unlink(this.f_state.path)
@@ -261,12 +261,12 @@ class CachedFileInode(object):
 				def __init__(this, block_cache):
 					this.block_cache = block_cache
 					this.size = block_cache.get_size()
-					this.f = this.block_cache.get_file()
-					this.f.seek(0)
+					this.file = this.block_cache.get_file()
+					this.file.seek(0)
 				def __len__(this):
 					return this.size
 				def read(this, size):
-					return this.f.read(size)
+					return this.file.read(size)
 
 			if parent_cap is None:
 				upath = this.upath
@@ -292,7 +292,7 @@ class CachedFileInode(object):
 	def unlink(this):
 		with this.cache_lock, this.lock:
 			if this.upath is not None and not this.invalidated:
-				os.unlink(this.f.path)
+				os.unlink(this.file.path)
 				os.unlink(this.f_state.path)
 				os.unlink(this.f_data.path)
 			this.upath = None

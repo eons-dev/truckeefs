@@ -83,8 +83,8 @@ class File (Inode):
 		try:
 			parent_cap = self.executor.LookupCap(udirname(self.upath), source_conn)
 			upload_path = parent_cap + "/" + ubasename(self.upath)
-			with open(local_path, 'rb') as f:
-				filecap = source_conn.put_file(upload_path, f, iscap=True)
+			with open(local_path, 'rb') as file:
+				filecap = source_conn.put_file(upload_path, file, iscap=True)
 			logging.info(f"PushUpstream: File {self.upath} uploaded to {upload_path} with filecap {filecap}")
 			return filecap
 		except Exception as e:

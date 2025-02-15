@@ -41,30 +41,30 @@ class CachedDirInode(object):
 		this.filename, this.key = cachedb.GetFileNameAndKey(upath)
 
 		try:
-			with FileOnDisk(this.filename, key=this.key, mode='rb') as f:
-				this.info = json_zlib_load(f)
+			with FileOnDisk(this.filename, key=this.key, mode='rb') as file:
+				this.info = json_zlib_load(file)
 			os.utime(this.filename, None)
 			return
 		except (IOError, OSError, ValueError):
 			pass
 
-		f = FileOnDisk(this.filename, key=this.key, mode='w+b')
+		file = FileOnDisk(this.filename, key=this.key, mode='w+b')
 		try:
 			if dircap is not None:
 				this.info = io.get_info(dircap, iscap=True)
 			else:
 				this.info = io.get_info(upath)
 			this.info[1]['retrieved'] = time.time()
-			json_zlib_dump(this.info, f)
+			json_zlib_dump(this.info, file)
 		except (HTTPError, IOError, ValueError):
 			os.unlink(this.filename)
 			raise IOError(errno.EREMOTEIO, "failed to retrieve information")
 		finally:
-			f.close()
+			file.close()
 
 	def _save_info(this):
-		with FileOnDisk(this.filename, key=this.key, mode='w+b') as f:
-			json_zlib_dump(this.info, f)
+		with FileOnDisk(this.filename, key=this.key, mode='w+b') as file:
+			json_zlib_dump(this.info, file)
 
 	def is_fresh(this, lifetime):
 		return (this.info[1]['retrieved'] + lifetime >= time.time())

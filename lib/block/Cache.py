@@ -9,8 +9,8 @@ Sits between the FileOnDisk (or CryptFile) layer and the remote file system. It 
 
 Interface:
 
-	BlockCachedFile(f, initial_cache_size, block_size=None): Constructor.
-	save_state(f) / restore_state(f, state_file): Persists or recovers cache state.
+	BlockCachedFile(file, initial_cache_size, block_size=None): Constructor.
+	save_state(file) / restore_state(file, state_file): Persists or recovers cache state.
 	_pad_file(new_size): Pads the file with zeros if needed.
 	receive_cached_data(offset, data_list): Accepts data read from the remote file to update the cache.
 	get_size(), get_file(), close(), truncate(size), write(offset, data), read(offset, length), pre_read(offset, length), pre_write(offset, length).
@@ -41,22 +41,22 @@ class BlockCachedFile(object):
 	synchronous.
 	"""
 
-	def __init__(this, f, initial_cache_size, block_size=None):
+	def __init__(this, file, initial_cache_size, block_size=None):
 		if block_size is None:
 			block_size = BLOCK_SIZE
 		this.size = initial_cache_size
-		this.storage = BlockStorage(f, block_size)
+		this.storage = BlockStorage(file, block_size)
 		this.block_size = this.storage.block_size
 		this.first_uncached_block = 0
 		this.cache_size = initial_cache_size
 
-	def save_state(this, f):
-		this.storage.save_state(f)
-		f.write(struct.pack('<QQQ', this.size, this.cache_size, this.first_uncached_block))
+	def save_state(this, file):
+		this.storage.save_state(file)
+		file.write(struct.pack('<QQQ', this.size, this.cache_size, this.first_uncached_block))
 
 	@classmethod
-	def restore_state(cls, f, state_file):
-		storage = BlockStorage.restore_state(f, state_file)
+	def restore_state(cls, file, state_file):
+		storage = BlockStorage.restore_state(file, state_file)
 		s = state_file.read(3 * 8)
 		size, cache_size, first_uncached_block = struct.unpack('<QQQ', s)
 
@@ -139,7 +139,7 @@ class BlockCachedFile(object):
 		return BlockCachedFileHandle(this)
 
 	def close(this):
-		this.storage.f.close()
+		this.storage.file.close()
 		this.storage = None
 
 	def truncate(this, size):

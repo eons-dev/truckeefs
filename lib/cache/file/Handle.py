@@ -64,9 +64,9 @@ class CachedFileHandle(object):
 		with this.lock:
 			if this.inode is None:
 				raise IOError(errno.EBADF, "Operation on a closed file")
-			c = this.inode
+			inode = this.inode
 			this.inode = None
-			c.decref()
+			inode.decref()
 
 	def read(this, io, offset, length):
 		with this.lock:
