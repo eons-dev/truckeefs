@@ -33,6 +33,7 @@ import errno
 import threading
 import codecs
 import heapq
+from pathlib import Path
 
 from cryptography.hazmat.primitives import hashes, hmac
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
