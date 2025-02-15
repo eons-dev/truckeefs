@@ -41,7 +41,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from .FileOnDisk import *
 from .block.Cache import *
-
+from .tahoe.TahoeConnection import *
 
 # RiverFS is a generic file system that adds caching and encryption to a remote file system, specifically TahoeFS.
 # All operations should be asynchronous, stateless and scalable, with all state stored in *this.
@@ -70,9 +70,6 @@ class RiverFS(eons.Executor):
 
 		# Open files and dirs
 		this.open_items = {}
-
-		# Restrict cache size
-		this.RestrictCacheSize()
 
 		# Directory cache
 		this._max_item_cache = 500
@@ -122,7 +119,7 @@ class RiverFS(eons.Executor):
 	
 	# Override this in your child class.
 	def Function(this):
-		pass
+		this.RestrictCacheSize()
 
 	
 	# Thread safe means of checking if an Inode already exists for the given upath

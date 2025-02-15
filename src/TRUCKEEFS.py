@@ -37,6 +37,7 @@ class TRUCKEEFS(RiverFS, fuse.Fuse):
 
 
 	def Function(this):
+		Super(TRUCKEEFS, this).Function()
 
 		this.fuse_args = fuse.FuseArgs()
 		this.fuse_args.mountpoint = this.mount
