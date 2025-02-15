@@ -22,7 +22,7 @@ TODOs/FIXMEs:
 
 
 import eons
-from .Inode import *
+from .common.Inode import *
 
 class Directory (Inode):
 	def __init__(this, upath="", name="Directory"):

@@ -20,7 +20,7 @@ TODOs/FIXMEs:
 """
 
 import eons
-from .Inode import *
+from .common.Inode import *
 
 class File (Inode):
 	def __init__(this, upath="", name="File"):

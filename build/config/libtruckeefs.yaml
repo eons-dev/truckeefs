@@ -25,15 +25,15 @@ next:
 			build_in: "../"
 			config: 
 				next:
-				- build: py_test
+				# - build: py_test
+				# 	build_in: "./"
+				# 	config:
+				# 		clear_build_path: false
+				# 		test_path: "./test/"
+        #     next:
+				- build: py_publish
+					run_when_any:
+					- release
 					build_in: "./"
 					config:
 						clear_build_path: false
-						test_path: "./test/"
-            next:
-            - build: py_publish
-              run_when_any:
-              - release
-              build_in: "./"
-              config:
-                clear_build_path: false

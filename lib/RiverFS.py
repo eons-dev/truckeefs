@@ -38,9 +38,7 @@ from cryptography.hazmat.primitives import hashes, hmac
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-from .Tahoe import *
 from .FileOnDisk import *
-# .block.Cache
 from .block.Cache import *
 
 
